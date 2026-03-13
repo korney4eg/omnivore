@@ -137,3 +137,25 @@ func (s *HighlightService) Delete(ctx context.Context, id, userID string) error 
 		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&models.Highlight{}).Error
 	})
 }
+
+// Search returns highlights for a user with optional keyword filter and pagination.
+func (s *HighlightService) Search(ctx context.Context, userID, query string, limit, offset int) ([]models.Highlight, int, error) {
+	q := s.db.Read.WithContext(ctx).
+		Preload("Labels").
+		Where("user_id = ?", userID)
+
+	if query != "" {
+		q = q.Where("annotation ILIKE ? OR quote ILIKE ?", "%"+query+"%", "%"+query+"%")
+	}
+
+	var total int64
+	if err := q.Model(&models.Highlight{}).Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count highlights: %w", err)
+	}
+
+	var hs []models.Highlight
+	if err := q.Order("created_at DESC").Offset(offset).Limit(limit).Find(&hs).Error; err != nil {
+		return nil, 0, fmt.Errorf("search highlights: %w", err)
+	}
+	return hs, int(total), nil
+}

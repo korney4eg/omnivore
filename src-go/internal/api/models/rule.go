@@ -8,7 +8,7 @@ type Rule struct {
 	UserID      string      `gorm:"column:user_id"`
 	Name        string      `gorm:"column:name"`
 	Filter      string      `gorm:"column:filter"`
-	Actions     JSONMap     `gorm:"column:actions;type:jsonb"`
+	Actions     JSONRaw     `gorm:"column:actions;type:jsonb"`
 	Description *string     `gorm:"column:description"`
 	EventTypes  StringArray `gorm:"column:event_types;type:text[]"`
 	Enabled     bool        `gorm:"column:enabled;default:true"`

@@ -89,3 +89,15 @@ func (s *SubscriptionService) Unsubscribe(ctx context.Context, id, userID string
 		Where("id = ? AND user_id = ?", id, userID).
 		Updates(map[string]any{"status": "UNSUBSCRIBED", "updated_at": time.Now()}).Error
 }
+
+// ListNewsletterEmails returns all newsletter email addresses for a user.
+func (s *SubscriptionService) ListNewsletterEmails(ctx context.Context, userID string) ([]models.NewsletterEmail, error) {
+	var emails []models.NewsletterEmail
+	if err := s.db.Read.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Find(&emails).Error; err != nil {
+		return nil, fmt.Errorf("list newsletter emails: %w", err)
+	}
+	return emails, nil
+}

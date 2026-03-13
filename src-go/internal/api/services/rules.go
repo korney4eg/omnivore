@@ -37,7 +37,7 @@ type SetRuleInput struct {
 	ID          *string
 	Name        string
 	Filter      string
-	Actions     models.JSONMap
+	Actions     models.JSONRaw
 	EventTypes  []string
 	Enabled     bool
 	Description *string

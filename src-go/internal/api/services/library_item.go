@@ -58,13 +58,14 @@ func (s *LibraryItemService) GetBySlug(ctx context.Context, slug, userID string)
 
 // SearchInput mirrors the TypeScript search parameters.
 type SearchInput struct {
-	Query     string
-	After     *string // opaque cursor (base64 offset)
-	First     *int    // page size (default 10, max 100)
-	Sort      *SortInput
-	Format    *string
-	Folder    *string
+	Query          string
+	After          *string    // opaque cursor (numeric offset as string)
+	First          *int       // page size (default 10, max 100)
+	Sort           *SortInput
+	Format         *string
+	Folder         *string
 	IncludeContent bool
+	Since          *time.Time // only return items updated after this time
 }
 
 // SortInput defines sort options.
@@ -98,6 +99,11 @@ func (s *LibraryItemService) Search(ctx context.Context, userID string, input Se
 	// Folder filter
 	if input.Folder != nil && *input.Folder != "" {
 		q = q.Where("folder = ?", *input.Folder)
+	}
+
+	// Since filter (used by UpdatesSince)
+	if input.Since != nil {
+		q = q.Where("updated_at > ?", *input.Since)
 	}
 
 	// Simple keyword search via PostgreSQL ILIKE (full-text upgrade in Phase 5+)

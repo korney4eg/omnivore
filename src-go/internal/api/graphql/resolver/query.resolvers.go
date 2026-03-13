@@ -7,204 +7,585 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/omnivore-app/omnivore/internal/api/graphql/generated"
 	"github.com/omnivore-app/omnivore/internal/api/graphql/model"
 	"github.com/omnivore-app/omnivore/internal/api/graphql/scalar"
+	dbmodel "github.com/omnivore-app/omnivore/internal/api/models"
+	"github.com/omnivore-app/omnivore/internal/api/middleware"
+	"github.com/omnivore-app/omnivore/internal/api/services"
 )
+
+var errNotImplemented = errors.New("not implemented")
+
+func requireAuth(ctx context.Context) (*middleware.Claims, error) {
+	c := middleware.ClaimsFromContext(ctx)
+	if c == nil {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return c, nil
+}
+
+// searchAfter converts an int offset to the *string cursor SearchInput expects.
+func searchAfter(offset int) *string {
+	s := strconv.Itoa(offset)
+	return &s
+}
 
 // Hello is the resolver for the hello field.
 func (r *queryResolver) Hello(ctx context.Context) (*string, error) {
-	panic(fmt.Errorf("not implemented: Hello - hello"))
+	s := "World"
+	return &s, nil
 }
 
 // Me is the resolver for the me field.
 func (r *queryResolver) Me(ctx context.Context) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: Me - me"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := r.Services.Users.GetByID(ctx, c.UID)
+	if err != nil {
+		return nil, err
+	}
+	return mapUser(u), nil
 }
 
 // User is the resolver for the user field.
 func (r *queryResolver) User(ctx context.Context, userID *string, username *string) (model.UserResult, error) {
-	panic(fmt.Errorf("not implemented: User - user"))
+	if userID != nil {
+		user, err := r.Services.Users.GetByID(ctx, *userID)
+		if err != nil || user == nil {
+			return model.UserError{ErrorCodes: []model.UserErrorCode{model.UserErrorCodeUserNotFound}}, nil
+		}
+		return model.UserSuccess{User: mapUser(user)}, nil
+	}
+	if username != nil {
+		user, err := r.Services.Users.GetByUsername(ctx, *username)
+		if err != nil || user == nil {
+			return model.UserError{ErrorCodes: []model.UserErrorCode{model.UserErrorCodeUserNotFound}}, nil
+		}
+		return model.UserSuccess{User: mapUser(user)}, nil
+	}
+	return model.UserError{ErrorCodes: []model.UserErrorCode{model.UserErrorCodeBadRequest}}, nil
 }
 
 // Article is the resolver for the article field.
 func (r *queryResolver) Article(ctx context.Context, username string, slug string, format *string) (model.ArticleResult, error) {
-	panic(fmt.Errorf("not implemented: Article - article"))
+	user, err := r.Services.Users.GetByUsername(ctx, username)
+	if err != nil || user == nil {
+		return model.ArticleError{ErrorCodes: []model.ArticleErrorCode{model.ArticleErrorCodeNotFound}}, nil
+	}
+	item, err := r.Services.LibraryItems.GetBySlug(ctx, slug, user.ID)
+	if err != nil || item == nil {
+		return model.ArticleError{ErrorCodes: []model.ArticleErrorCode{model.ArticleErrorCodeNotFound}}, nil
+	}
+	return model.ArticleSuccess{Article: mapLibraryItem(item)}, nil
 }
 
 // Users is the resolver for the users field.
 func (r *queryResolver) Users(ctx context.Context) (model.UsersResult, error) {
-	panic(fmt.Errorf("not implemented: Users - users"))
+	return model.UsersError{ErrorCodes: []model.UsersErrorCode{model.UsersErrorCodeUnauthorized}}, nil
 }
 
 // ValidateUsername is the resolver for the validateUsername field.
 func (r *queryResolver) ValidateUsername(ctx context.Context, username string) (bool, error) {
-	panic(fmt.Errorf("not implemented: ValidateUsername - validateUsername"))
+	user, err := r.Services.Users.GetByUsername(ctx, username)
+	if err != nil {
+		return false, err
+	}
+	return user == nil, nil
 }
 
 // GetUserPersonalization is the resolver for the getUserPersonalization field.
 func (r *queryResolver) GetUserPersonalization(ctx context.Context) (model.GetUserPersonalizationResult, error) {
-	panic(fmt.Errorf("not implemented: GetUserPersonalization - getUserPersonalization"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.GetUserPersonalizationError{ErrorCodes: []model.GetUserPersonalizationErrorCode{model.GetUserPersonalizationErrorCodeUnauthorized}}, nil
+	}
+	p, err := r.Services.Users.GetPersonalization(ctx, c.UID)
+	if err != nil {
+		return model.GetUserPersonalizationError{ErrorCodes: []model.GetUserPersonalizationErrorCode{model.GetUserPersonalizationErrorCodeUnauthorized}}, nil
+	}
+	return model.GetUserPersonalizationSuccess{UserPersonalization: mapPersonalization(p)}, nil
 }
 
 // ArticleSavingRequest is the resolver for the articleSavingRequest field.
 func (r *queryResolver) ArticleSavingRequest(ctx context.Context, id *string, url *string) (model.ArticleSavingRequestResult, error) {
-	panic(fmt.Errorf("not implemented: ArticleSavingRequest - articleSavingRequest"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.ArticleSavingRequestError{ErrorCodes: []model.ArticleSavingRequestErrorCode{model.ArticleSavingRequestErrorCodeUnauthorized}}, nil
+	}
+	if id == nil {
+		return model.ArticleSavingRequestError{ErrorCodes: []model.ArticleSavingRequestErrorCode{model.ArticleSavingRequestErrorCodeNotFound}}, nil
+	}
+	item, err := r.Services.LibraryItems.GetByID(ctx, *id, c.UID)
+	if err != nil || item == nil {
+		return model.ArticleSavingRequestError{ErrorCodes: []model.ArticleSavingRequestErrorCode{model.ArticleSavingRequestErrorCodeNotFound}}, nil
+	}
+	state := model.ArticleSavingRequestStatus(item.State)
+	req := &model.ArticleSavingRequest{ID: item.ID, UserID: item.UserID, Status: state}
+	return model.ArticleSavingRequestSuccess{ArticleSavingRequest: req}, nil
 }
 
 // NewsletterEmails is the resolver for the newsletterEmails field.
 func (r *queryResolver) NewsletterEmails(ctx context.Context) (model.NewsletterEmailsResult, error) {
-	panic(fmt.Errorf("not implemented: NewsletterEmails - newsletterEmails"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.NewsletterEmailsError{ErrorCodes: []model.NewsletterEmailsErrorCode{model.NewsletterEmailsErrorCodeUnauthorized}}, nil
+	}
+	emails, err := r.Services.Subscriptions.ListNewsletterEmails(ctx, c.UID)
+	if err != nil {
+		return model.NewsletterEmailsError{ErrorCodes: []model.NewsletterEmailsErrorCode{model.NewsletterEmailsErrorCodeUnauthorized}}, nil
+	}
+	return model.NewsletterEmailsSuccess{NewsletterEmails: mapNewsletterEmails(emails)}, nil
 }
 
 // Labels is the resolver for the labels field.
 func (r *queryResolver) Labels(ctx context.Context) (model.LabelsResult, error) {
-	panic(fmt.Errorf("not implemented: Labels - labels"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.LabelsError{ErrorCodes: []model.LabelsErrorCode{model.LabelsErrorCodeUnauthorized}}, nil
+	}
+	labels, err := r.Services.Labels.ListByUser(ctx, c.UID)
+	if err != nil {
+		return model.LabelsError{ErrorCodes: []model.LabelsErrorCode{model.LabelsErrorCodeUnauthorized}}, nil
+	}
+	return model.LabelsSuccess{Labels: mapLabels(labels)}, nil
 }
 
 // Search is the resolver for the search field.
 func (r *queryResolver) Search(ctx context.Context, after *string, first *int, query *string, includeContent *bool, format *string) (model.SearchResult, error) {
-	panic(fmt.Errorf("not implemented: Search - search"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SearchError{ErrorCodes: []model.SearchErrorCode{model.SearchErrorCodeUnauthorized}}, nil
+	}
+	q := ""
+	if query != nil {
+		q = *query
+	}
+	inc := false
+	if includeContent != nil {
+		inc = *includeContent
+	}
+	result, err := r.Services.LibraryItems.Search(ctx, c.UID, services.SearchInput{
+		Query: q, After: after, First: first, Format: format, IncludeContent: inc,
+	})
+	if err != nil {
+		return model.SearchError{ErrorCodes: []model.SearchErrorCode{model.SearchErrorCodeUnauthorized}}, nil
+	}
+	// Determine offset from after cursor
+	offset := 0
+	if after != nil {
+		offset, _ = strconv.Atoi(*after)
+	}
+	edges := make([]*model.SearchItemEdge, 0, len(result.Items))
+	for i := range result.Items {
+		edges = append(edges, &model.SearchItemEdge{
+			Cursor: strconv.Itoa(offset + i + 1),
+			Node:   mapLibraryItemToSearchItem(&result.Items[i]),
+		})
+	}
+	total := int(result.TotalCount)
+	endCursor := strconv.Itoa(offset + len(result.Items))
+	return model.SearchSuccess{
+		Edges:    edges,
+		PageInfo: &model.PageInfo{HasNextPage: result.HasNext, EndCursor: &endCursor, TotalCount: &total},
+	}, nil
 }
 
 // GetDiscoverFeedArticles is the resolver for the getDiscoverFeedArticles field.
 func (r *queryResolver) GetDiscoverFeedArticles(ctx context.Context, discoverTopicID string, feedID *string, after *string, first *int) (model.GetDiscoverFeedArticleResults, error) {
-	panic(fmt.Errorf("not implemented: GetDiscoverFeedArticles - getDiscoverFeedArticles"))
+	return model.GetDiscoverFeedArticleError{ErrorCodes: []model.GetDiscoverFeedArticleErrorCode{model.GetDiscoverFeedArticleErrorCodeUnauthorized}}, nil
 }
 
 // DiscoverTopics is the resolver for the discoverTopics field.
 func (r *queryResolver) DiscoverTopics(ctx context.Context) (model.GetDiscoverTopicResults, error) {
-	panic(fmt.Errorf("not implemented: DiscoverTopics - discoverTopics"))
+	return model.GetDiscoverTopicError{ErrorCodes: []model.GetDiscoverTopicErrorCode{model.GetDiscoverTopicErrorCodeUnauthorized}}, nil
 }
 
 // Subscriptions is the resolver for the subscriptions field.
 func (r *queryResolver) Subscriptions(ctx context.Context, sort *model.SortParams, typeArg *model.SubscriptionType) (model.SubscriptionsResult, error) {
-	panic(fmt.Errorf("not implemented: Subscriptions - subscriptions"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SubscriptionsError{ErrorCodes: []model.SubscriptionsErrorCode{model.SubscriptionsErrorCodeUnauthorized}}, nil
+	}
+	var typeStr *string
+	if typeArg != nil {
+		s := string(*typeArg)
+		typeStr = &s
+	}
+	subs, err := r.Services.Subscriptions.List(ctx, c.UID, typeStr)
+	if err != nil {
+		return model.SubscriptionsError{ErrorCodes: []model.SubscriptionsErrorCode{model.SubscriptionsErrorCodeUnauthorized}}, nil
+	}
+	return model.SubscriptionsSuccess{Subscriptions: mapSubscriptions(subs)}, nil
 }
 
 // SendInstallInstructions is the resolver for the sendInstallInstructions field.
 func (r *queryResolver) SendInstallInstructions(ctx context.Context) (model.SendInstallInstructionsResult, error) {
-	panic(fmt.Errorf("not implemented: SendInstallInstructions - sendInstallInstructions"))
+	return model.SendInstallInstructionsError{ErrorCodes: []model.SendInstallInstructionsErrorCode{model.SendInstallInstructionsErrorCodeUnauthorized}}, nil
 }
 
 // Webhooks is the resolver for the webhooks field.
 func (r *queryResolver) Webhooks(ctx context.Context) (model.WebhooksResult, error) {
-	panic(fmt.Errorf("not implemented: Webhooks - webhooks"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.WebhooksError{ErrorCodes: []model.WebhooksErrorCode{model.WebhooksErrorCodeUnauthorized}}, nil
+	}
+	ws, err := r.Services.Webhooks.List(ctx, c.UID)
+	if err != nil {
+		return model.WebhooksError{ErrorCodes: []model.WebhooksErrorCode{model.WebhooksErrorCodeUnauthorized}}, nil
+	}
+	return model.WebhooksSuccess{Webhooks: mapWebhooks(ws)}, nil
 }
 
 // Webhook is the resolver for the webhook field.
 func (r *queryResolver) Webhook(ctx context.Context, id string) (model.WebhookResult, error) {
-	panic(fmt.Errorf("not implemented: Webhook - webhook"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.WebhookError{ErrorCodes: []model.WebhookErrorCode{model.WebhookErrorCodeUnauthorized}}, nil
+	}
+	w, err := r.Services.Webhooks.GetByID(ctx, id, c.UID)
+	if err != nil || w == nil {
+		return model.WebhookError{ErrorCodes: []model.WebhookErrorCode{model.WebhookErrorCodeNotFound}}, nil
+	}
+	return model.WebhookSuccess{Webhook: mapWebhook(w)}, nil
 }
 
 // APIKeys is the resolver for the apiKeys field.
 func (r *queryResolver) APIKeys(ctx context.Context) (model.APIKeysResult, error) {
-	panic(fmt.Errorf("not implemented: APIKeys - apiKeys"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.APIKeysError{ErrorCodes: []model.APIKeysErrorCode{model.APIKeysErrorCodeUnauthorized}}, nil
+	}
+	keys, err := r.Services.APIKeys.List(ctx, c.UID)
+	if err != nil {
+		return model.APIKeysError{ErrorCodes: []model.APIKeysErrorCode{model.APIKeysErrorCodeUnauthorized}}, nil
+	}
+	gqlKeys := make([]*model.APIKey, 0, len(keys))
+	for i := range keys {
+		gqlKeys = append(gqlKeys, mapAPIKey(&keys[i], nil))
+	}
+	return model.APIKeysSuccess{APIKeys: gqlKeys}, nil
 }
 
 // TypeaheadSearch is the resolver for the typeaheadSearch field.
 func (r *queryResolver) TypeaheadSearch(ctx context.Context, query string, first *int) (model.TypeaheadSearchResult, error) {
-	panic(fmt.Errorf("not implemented: TypeaheadSearch - typeaheadSearch"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.TypeaheadSearchError{ErrorCodes: []model.TypeaheadSearchErrorCode{model.TypeaheadSearchErrorCodeUnauthorized}}, nil
+	}
+	limit := 5
+	if first != nil {
+		limit = *first
+	}
+	result, err := r.Services.LibraryItems.Search(ctx, c.UID, services.SearchInput{Query: query, First: &limit})
+	if err != nil {
+		return model.TypeaheadSearchError{ErrorCodes: []model.TypeaheadSearchErrorCode{model.TypeaheadSearchErrorCodeUnauthorized}}, nil
+	}
+	hits := make([]*model.TypeaheadSearchItem, 0, len(result.Items))
+	for i := range result.Items {
+		hits = append(hits, &model.TypeaheadSearchItem{
+			ID:       result.Items[i].ID,
+			Title:    result.Items[i].Title,
+			Slug:     result.Items[i].Slug,
+			SiteName: result.Items[i].SiteName,
+		})
+	}
+	return model.TypeaheadSearchSuccess{Items: hits}, nil
 }
 
 // UpdatesSince is the resolver for the updatesSince field.
 func (r *queryResolver) UpdatesSince(ctx context.Context, after *string, first *int, since scalar.Date, sort *model.SortParams, folder *string) (model.UpdatesSinceResult, error) {
-	panic(fmt.Errorf("not implemented: UpdatesSince - updatesSince"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdatesSinceError{ErrorCodes: []model.UpdatesSinceErrorCode{model.UpdatesSinceErrorCodeUnauthorized}}, nil
+	}
+	sinceTime := time.Time(since)
+	result, err := r.Services.LibraryItems.Search(ctx, c.UID, services.SearchInput{
+		After: after, First: first, Folder: folder, Since: &sinceTime,
+	})
+	if err != nil {
+		return model.UpdatesSinceError{ErrorCodes: []model.UpdatesSinceErrorCode{model.UpdatesSinceErrorCodeUnauthorized}}, nil
+	}
+	offset := 0
+	if after != nil {
+		offset, _ = strconv.Atoi(*after)
+	}
+	edges := make([]*model.SyncUpdatedItemEdge, 0, len(result.Items))
+	for i := range result.Items {
+		edges = append(edges, &model.SyncUpdatedItemEdge{
+			UpdateReason: model.UpdateReasonCreated,
+			Node:         mapSearchItem(&result.Items[i]),
+		})
+	}
+	total := int(result.TotalCount)
+	endCursor := strconv.Itoa(offset + len(result.Items))
+	return model.UpdatesSinceSuccess{
+		Edges:    edges,
+		PageInfo: &model.PageInfo{HasNextPage: result.HasNext, EndCursor: &endCursor, TotalCount: &total},
+	}, nil
 }
 
 // Integration is the resolver for the integration field.
 func (r *queryResolver) Integration(ctx context.Context, name string) (model.IntegrationResult, error) {
-	panic(fmt.Errorf("not implemented: Integration - integration"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.IntegrationError{ErrorCodes: []model.IntegrationErrorCode{model.IntegrationErrorCodeNotFound}}, nil
+	}
+	integrations, err := r.Services.Integrations.List(ctx, c.UID)
+	if err != nil {
+		return model.IntegrationError{ErrorCodes: []model.IntegrationErrorCode{model.IntegrationErrorCodeNotFound}}, nil
+	}
+	for i := range integrations {
+		if integrations[i].Name == name {
+			return model.IntegrationSuccess{Integration: mapIntegration(&integrations[i])}, nil
+		}
+	}
+	return model.IntegrationError{ErrorCodes: []model.IntegrationErrorCode{model.IntegrationErrorCodeNotFound}}, nil
 }
 
 // Integrations is the resolver for the integrations field.
 func (r *queryResolver) Integrations(ctx context.Context) (model.IntegrationsResult, error) {
-	panic(fmt.Errorf("not implemented: Integrations - integrations"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.IntegrationsError{ErrorCodes: []model.IntegrationsErrorCode{model.IntegrationsErrorCodeUnauthorized}}, nil
+	}
+	items, err := r.Services.Integrations.List(ctx, c.UID)
+	if err != nil {
+		return model.IntegrationsError{ErrorCodes: []model.IntegrationsErrorCode{model.IntegrationsErrorCodeUnauthorized}}, nil
+	}
+	return model.IntegrationsSuccess{Integrations: mapIntegrations(items)}, nil
 }
 
 // RecentSearches is the resolver for the recentSearches field.
 func (r *queryResolver) RecentSearches(ctx context.Context) (model.RecentSearchesResult, error) {
-	panic(fmt.Errorf("not implemented: RecentSearches - recentSearches"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.RecentSearchesError{ErrorCodes: []model.RecentSearchesErrorCode{model.RecentSearchesErrorCodeUnauthorized}}, nil
+	}
+	return model.RecentSearchesSuccess{Searches: []*model.RecentSearch{}}, nil
 }
 
 // Rules is the resolver for the rules field.
 func (r *queryResolver) Rules(ctx context.Context, enabled *bool) (model.RulesResult, error) {
-	panic(fmt.Errorf("not implemented: Rules - rules"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.RulesError{ErrorCodes: []model.RulesErrorCode{model.RulesErrorCodeUnauthorized}}, nil
+	}
+	rules, err := r.Services.Rules.List(ctx, c.UID)
+	if err != nil {
+		return model.RulesError{ErrorCodes: []model.RulesErrorCode{model.RulesErrorCodeUnauthorized}}, nil
+	}
+	return model.RulesSuccess{Rules: mapRules(rules)}, nil
 }
 
 // DeviceTokens is the resolver for the deviceTokens field.
 func (r *queryResolver) DeviceTokens(ctx context.Context) (model.DeviceTokensResult, error) {
-	panic(fmt.Errorf("not implemented: DeviceTokens - deviceTokens"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeviceTokensError{ErrorCodes: []model.DeviceTokensErrorCode{model.DeviceTokensErrorCodeUnauthorized}}, nil
+	}
+	return model.DeviceTokensSuccess{DeviceTokens: []*model.DeviceToken{}}, nil
 }
 
 // Filters is the resolver for the filters field.
 func (r *queryResolver) Filters(ctx context.Context) (model.FiltersResult, error) {
-	panic(fmt.Errorf("not implemented: Filters - filters"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.FiltersError{ErrorCodes: []model.FiltersErrorCode{model.FiltersErrorCodeUnauthorized}}, nil
+	}
+	filters, err := r.Services.Filters.List(ctx, c.UID)
+	if err != nil {
+		return model.FiltersError{ErrorCodes: []model.FiltersErrorCode{model.FiltersErrorCodeUnauthorized}}, nil
+	}
+	return model.FiltersSuccess{Filters: mapFilters(filters)}, nil
 }
 
 // Groups is the resolver for the groups field.
 func (r *queryResolver) Groups(ctx context.Context) (model.GroupsResult, error) {
-	panic(fmt.Errorf("not implemented: Groups - groups"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.GroupsError{ErrorCodes: []model.GroupsErrorCode{model.GroupsErrorCodeUnauthorized}}, nil
+	}
+	return model.GroupsSuccess{Groups: []*model.RecommendationGroup{}}, nil
 }
 
 // RecentEmails is the resolver for the recentEmails field.
 func (r *queryResolver) RecentEmails(ctx context.Context) (model.RecentEmailsResult, error) {
-	panic(fmt.Errorf("not implemented: RecentEmails - recentEmails"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.RecentEmailsError{ErrorCodes: []model.RecentEmailsErrorCode{model.RecentEmailsErrorCodeUnauthorized}}, nil
+	}
+	return model.RecentEmailsSuccess{RecentEmails: []*model.RecentEmail{}}, nil
 }
 
 // Feeds is the resolver for the feeds field.
 func (r *queryResolver) Feeds(ctx context.Context, input model.FeedsInput) (model.FeedsResult, error) {
-	panic(fmt.Errorf("not implemented: Feeds - feeds"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.FeedsError{ErrorCodes: []model.FeedsErrorCode{model.FeedsErrorCodeUnauthorized}}, nil
+	}
+	return model.FeedsSuccess{Edges: []*model.FeedEdge{}, PageInfo: &model.PageInfo{HasNextPage: false}}, nil
 }
 
 // DiscoverFeeds is the resolver for the discoverFeeds field.
 func (r *queryResolver) DiscoverFeeds(ctx context.Context) (model.DiscoverFeedResult, error) {
-	panic(fmt.Errorf("not implemented: DiscoverFeeds - discoverFeeds"))
+	return model.DiscoverFeedError{ErrorCodes: []model.DiscoverFeedErrorCode{model.DiscoverFeedErrorCodeUnauthorized}}, nil
 }
 
 // ScanFeeds is the resolver for the scanFeeds field.
 func (r *queryResolver) ScanFeeds(ctx context.Context, input model.ScanFeedsInput) (model.ScanFeedsResult, error) {
-	panic(fmt.Errorf("not implemented: ScanFeeds - scanFeeds"))
+	return model.ScanFeedsError{ErrorCodes: []model.ScanFeedsErrorCode{model.ScanFeedsErrorCodeBadRequest}}, nil
 }
 
 // Home is the resolver for the home field.
 func (r *queryResolver) Home(ctx context.Context, first *int, after *string) (model.HomeResult, error) {
-	panic(fmt.Errorf("not implemented: Home - home"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.HomeError{ErrorCodes: []model.HomeErrorCode{model.HomeErrorCodeUnauthorized}}, nil
+	}
+	return model.HomeSuccess{Edges: []*model.HomeEdge{}, PageInfo: &model.PageInfo{HasNextPage: false}}, nil
 }
 
 // Subscription is the resolver for the subscription field.
 func (r *queryResolver) Subscription(ctx context.Context, id string) (model.SubscriptionResult, error) {
-	panic(fmt.Errorf("not implemented: Subscription - subscription"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SubscriptionError{ErrorCodes: []model.ErrorCode{model.ErrorCodeUnauthorized}}, nil
+	}
+	sub, err := r.Services.Subscriptions.GetByID(ctx, id, c.UID)
+	if err != nil || sub == nil {
+		return model.SubscriptionError{ErrorCodes: []model.ErrorCode{model.ErrorCodeNotFound}}, nil
+	}
+	return model.SubscriptionSuccess{Subscription: mapSubscription(sub)}, nil
 }
 
 // HiddenHomeSection is the resolver for the hiddenHomeSection field.
 func (r *queryResolver) HiddenHomeSection(ctx context.Context) (model.HiddenHomeSectionResult, error) {
-	panic(fmt.Errorf("not implemented: HiddenHomeSection - hiddenHomeSection"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.HiddenHomeSectionError{ErrorCodes: []model.HiddenHomeSectionErrorCode{model.HiddenHomeSectionErrorCodeUnauthorized}}, nil
+	}
+	return model.HiddenHomeSectionSuccess{}, nil
 }
 
 // Highlights is the resolver for the highlights field.
 func (r *queryResolver) Highlights(ctx context.Context, after *string, first *int, query *string) (model.HighlightsResult, error) {
-	panic(fmt.Errorf("not implemented: Highlights - highlights"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.HighlightsError{ErrorCodes: []model.HighlightsErrorCode{model.HighlightsErrorCodeBadRequest}}, nil
+	}
+	limit := 20
+	if first != nil {
+		limit = *first
+	}
+	offset := 0
+	if after != nil {
+		offset, _ = strconv.Atoi(*after)
+	}
+	q := ""
+	if query != nil {
+		q = *query
+	}
+	highlights, total, err := r.Services.Highlights.Search(ctx, c.UID, q, limit, offset)
+	if err != nil {
+		return model.HighlightsError{ErrorCodes: []model.HighlightsErrorCode{model.HighlightsErrorCodeBadRequest}}, nil
+	}
+	edges := make([]*model.HighlightEdge, 0, len(highlights))
+	for i := range highlights {
+		edges = append(edges, &model.HighlightEdge{
+			Cursor: strconv.Itoa(offset + i + 1),
+			Node:   mapHighlight(&highlights[i]),
+		})
+	}
+	endCursor := strconv.Itoa(offset + len(highlights))
+	hasNextPage := offset+len(highlights) < total
+	return model.HighlightsSuccess{
+		Edges:    edges,
+		PageInfo: &model.PageInfo{HasNextPage: hasNextPage, EndCursor: &endCursor, TotalCount: &total},
+	}, nil
 }
 
 // FolderPolicies is the resolver for the folderPolicies field.
 func (r *queryResolver) FolderPolicies(ctx context.Context) (model.FolderPoliciesResult, error) {
-	panic(fmt.Errorf("not implemented: FolderPolicies - folderPolicies"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.FolderPoliciesError{ErrorCodes: []model.FolderPoliciesErrorCode{model.FolderPoliciesErrorCodeUnauthorized}}, nil
+	}
+	return model.FolderPoliciesSuccess{Policies: []*model.FolderPolicy{}}, nil
 }
 
 // Posts is the resolver for the posts field.
 func (r *queryResolver) Posts(ctx context.Context, userID string, after *string, first *int) (model.PostsResult, error) {
-	panic(fmt.Errorf("not implemented: Posts - posts"))
+	return model.PostsError{ErrorCodes: []model.PostsErrorCode{model.PostsErrorCodeUnauthorized}}, nil
 }
 
 // Post is the resolver for the post field.
 func (r *queryResolver) Post(ctx context.Context, id string) (model.PostResult, error) {
-	panic(fmt.Errorf("not implemented: Post - post"))
+	return model.PostError{ErrorCodes: []model.PostErrorCode{model.PostErrorCodeUnauthorized}}, nil
 }
 
 // Query returns generated.QueryResolver implementation.
 func (r *Resolver) Query() generated.QueryResolver { return &queryResolver{r} }
 
 type queryResolver struct{ *Resolver }
+
+// mapLibraryItemToSearchItem converts a LibraryItem GORM model to a SearchItem GraphQL model.
+func mapLibraryItemToSearchItem(item *dbmodel.LibraryItem) *model.SearchItem {
+	state := model.ArticleSavingRequestStatus(item.State)
+	cr := model.ContentReader(item.ContentReader)
+	progressTop := float64(item.ReadingProgressTopPercent)
+	gql := &model.SearchItem{
+		ID:                         item.ID,
+		Title:                      item.Title,
+		Slug:                       item.Slug,
+		URL:                        item.OriginalURL,
+		ContentReader:              cr,
+		Author:                     item.Author,
+		Description:                item.Description,
+		CreatedAt:                  scalar.Date(item.CreatedAt),
+		SavedAt:                    scalar.Date(item.SavedAt),
+		ReadingProgressPercent:     float64(item.ReadingProgressBottomPercent),
+		ReadingProgressTopPercent:  &progressTop,
+		ReadingProgressAnchorIndex: item.ReadingProgressLastReadAnchor,
+		IsArchived:                 item.ArchivedAt != nil,
+		Folder:                     item.Folder,
+		SiteName:                   item.SiteName,
+		SiteIcon:                   item.SiteIcon,
+		Subscription:               item.Subscription,
+		Language:                   item.ItemLanguage,
+		WordsCount:                 item.WordCount,
+		UploadFileID:               item.UploadFileID,
+		FeedContent:                item.FeedContent,
+		State:                      &state,
+		Highlights:                 []*model.Highlight{},
+		Recommendations:            []*model.Recommendation{},
+		Labels:                     []*model.Label{},
+	}
+	d := scalar.Date(item.UpdatedAt)
+	gql.UpdatedAt = &d
+	if item.PublishedAt != nil {
+		pd := scalar.Date(*item.PublishedAt)
+		gql.PublishedAt = &pd
+	}
+	if item.ReadAt != nil {
+		rd := scalar.Date(*item.ReadAt)
+		gql.ReadAt = &rd
+	}
+	if item.Thumbnail != nil {
+		gql.Image = item.Thumbnail
+	}
+	for i := range item.Labels {
+		gql.Labels = append(gql.Labels, mapLabel(&item.Labels[i]))
+	}
+	for i := range item.Highlights {
+		gql.Highlights = append(gql.Highlights, mapHighlight(&item.Highlights[i]))
+	}
+	return gql
+}

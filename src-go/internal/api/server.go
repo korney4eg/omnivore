@@ -9,22 +9,30 @@ import (
 	"github.com/omnivore-app/omnivore/internal/api/graphql/resolver"
 	"github.com/omnivore-app/omnivore/internal/api/middleware"
 	"github.com/omnivore-app/omnivore/internal/api/rest/auth"
+	"github.com/omnivore-app/omnivore/internal/api/services"
 	"github.com/omnivore-app/omnivore/internal/config"
 	"github.com/omnivore-app/omnivore/internal/db"
 	"github.com/omnivore-app/omnivore/internal/redisutil"
+	"github.com/omnivore-app/omnivore/internal/storage"
 )
 
 // Server is the root HTTP handler for the Omnivore API.
 type Server struct {
-	cfg     *config.Config
-	db      *db.DB
-	redis   *redisutil.RedisDataSource
-	handler http.Handler
+	cfg      *config.Config
+	db       *db.DB
+	redis    *redisutil.RedisDataSource
+	services *services.Container
+	handler  http.Handler
 }
 
 // New wires up all routes and middleware and returns a ready-to-serve Server.
-func New(cfg *config.Config, database *db.DB, redis *redisutil.RedisDataSource) *Server {
-	s := &Server{cfg: cfg, db: database, redis: redis}
+func New(cfg *config.Config, database *db.DB, redis *redisutil.RedisDataSource, store *storage.Client) *Server {
+	s := &Server{
+		cfg:      cfg,
+		db:       database,
+		redis:    redis,
+		services: services.New(cfg, database, redis, store),
+	}
 	s.handler = s.routes()
 	return s
 }
@@ -57,9 +65,10 @@ func (s *Server) routes() http.Handler {
 	gqlHandler := handler.NewDefaultServer(
 		generated.NewExecutableSchema(generated.Config{
 			Resolvers: &resolver.Resolver{
-				Config: s.cfg,
-				DB:     s.db,
-				Redis:  s.redis,
+				Config:   s.cfg,
+				DB:       s.db,
+				Redis:    s.redis,
+				Services: s.services,
 			},
 		}),
 	)

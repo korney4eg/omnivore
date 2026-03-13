@@ -34,6 +34,33 @@ func (j *JSONMap) Scan(src any) error {
 	return json.Unmarshal(bytes, j)
 }
 
+// JSONRaw stores an arbitrary JSON value (object or array) as raw bytes.
+type JSONRaw json.RawMessage
+
+func (j JSONRaw) Value() (driver.Value, error) {
+	if j == nil {
+		return nil, nil
+	}
+	return string(j), nil
+}
+
+func (j *JSONRaw) Scan(src any) error {
+	if src == nil {
+		*j = nil
+		return nil
+	}
+	switch v := src.(type) {
+	case string:
+		*j = JSONRaw(v)
+	case []byte:
+		*j = make(JSONRaw, len(v))
+		copy(*j, v)
+	default:
+		return fmt.Errorf("JSONRaw: unsupported type %T", src)
+	}
+	return nil
+}
+
 // StringArray is a helper for PostgreSQL text[] columns stored as JSON arrays.
 type StringArray []string
 

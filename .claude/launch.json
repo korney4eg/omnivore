@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api-go",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd src-go && go run . server api"],
+      "port": 4000
+    },
+    {
+      "name": "content-fetcher-go",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd src-go && go run . server content-fetcher"],
+      "port": 8080
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["workspace", "@omnivore/api", "dev"],
+      "port": 4000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["workspace", "@omnivore/web", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "content-fetch",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["workspace", "@omnivore/content-fetch", "start"],
+      "port": 9090
+    }
+  ]
+}

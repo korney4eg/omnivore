@@ -14,6 +14,7 @@ import (
 	"github.com/omnivore-app/omnivore/internal/config"
 	"github.com/omnivore-app/omnivore/internal/db"
 	"github.com/omnivore-app/omnivore/internal/redisutil"
+	"github.com/omnivore-app/omnivore/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -54,8 +55,19 @@ func runAPI(_ *cobra.Command, _ []string) error {
 	}
 	defer database.Close()
 
+	// Connect to blob storage (optional — empty URL disables storage features)
+	var store *storage.Client
+	if cfg.BlobStorageURL != "" {
+		var storeErr error
+		store, storeErr = storage.New(context.Background(), cfg.BlobStorageURL)
+		if storeErr != nil {
+			log.Fatalf("failed to open blob storage: %v", storeErr)
+		}
+		defer store.Close()
+	}
+
 	// Build the HTTP server
-	apiServer := api.New(cfg, database, redisDS)
+	apiServer := api.New(cfg, database, redisDS, store)
 
 	port := cfg.APIPort
 	if port == 0 {
