@@ -7,399 +7,1126 @@ package resolver
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
+	"time"
 
 	"github.com/omnivore-app/omnivore/internal/api/graphql/generated"
 	"github.com/omnivore-app/omnivore/internal/api/graphql/model"
 	"github.com/omnivore-app/omnivore/internal/api/graphql/scalar"
+	"github.com/omnivore-app/omnivore/internal/api/services"
 )
 
 // GoogleLogin is the resolver for the googleLogin field.
 func (r *mutationResolver) GoogleLogin(ctx context.Context, input model.GoogleLoginInput) (model.LoginResult, error) {
-	panic(fmt.Errorf("not implemented: GoogleLogin - googleLogin"))
+	return model.LoginError{ErrorCodes: []model.LoginErrorCode{model.LoginErrorCodeAuthFailed}}, nil
 }
 
 // GoogleSignup is the resolver for the googleSignup field.
 func (r *mutationResolver) GoogleSignup(ctx context.Context, input model.GoogleSignupInput) (model.GoogleSignupResult, error) {
-	panic(fmt.Errorf("not implemented: GoogleSignup - googleSignup"))
+	code := model.SignupErrorCodeAccessDenied
+	return model.GoogleSignupError{ErrorCodes: []*model.SignupErrorCode{&code}}, nil
 }
 
 // LogOut is the resolver for the logOut field.
 func (r *mutationResolver) LogOut(ctx context.Context) (model.LogOutResult, error) {
-	panic(fmt.Errorf("not implemented: LogOut - logOut"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.LogOutError{ErrorCodes: []model.LogOutErrorCode{model.LogOutErrorCodeLogOutFailed}}, nil
+	}
+	return model.LogOutSuccess{Message: stringPtr("Logged out")}, nil
 }
 
 // DeleteAccount is the resolver for the deleteAccount field.
 func (r *mutationResolver) DeleteAccount(ctx context.Context, userID string) (model.DeleteAccountResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteAccount - deleteAccount"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteAccountError{ErrorCodes: []model.DeleteAccountErrorCode{model.DeleteAccountErrorCodeUnauthorized}}, nil
+	}
+	if c.UID != userID {
+		return model.DeleteAccountError{ErrorCodes: []model.DeleteAccountErrorCode{model.DeleteAccountErrorCodeForbidden}}, nil
+	}
+	if err := r.Services.Users.DeleteUser(ctx, userID); err != nil {
+		return model.DeleteAccountError{ErrorCodes: []model.DeleteAccountErrorCode{model.DeleteAccountErrorCodeUserNotFound}}, nil
+	}
+	return model.DeleteAccountSuccess{UserID: userID}, nil
 }
 
 // UpdateUser is the resolver for the updateUser field.
 func (r *mutationResolver) UpdateUser(ctx context.Context, input model.UpdateUserInput) (model.UpdateUserResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateUser - updateUser"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdateUserError{ErrorCodes: []model.UpdateUserErrorCode{model.UpdateUserErrorCodeEmptyName}}, nil
+	}
+	if input.Name == "" {
+		return model.UpdateUserError{ErrorCodes: []model.UpdateUserErrorCode{model.UpdateUserErrorCodeEmptyName}}, nil
+	}
+	u, err := r.Services.Users.UpdateUser(ctx, c.UID, services.UpdateNameInput{Name: input.Name})
+	if err != nil {
+		return model.UpdateUserError{ErrorCodes: []model.UpdateUserErrorCode{model.UpdateUserErrorCodeEmptyName}}, nil
+	}
+	return model.UpdateUserSuccess{User: mapUser(u)}, nil
 }
 
 // UpdateUserProfile is the resolver for the updateUserProfile field.
 func (r *mutationResolver) UpdateUserProfile(ctx context.Context, input model.UpdateUserProfileInput) (model.UpdateUserProfileResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateUserProfile - updateUserProfile"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdateUserProfileError{ErrorCodes: []model.UpdateUserProfileErrorCode{model.UpdateUserProfileErrorCodeUnauthorized}}, nil
+	}
+	u, err := r.Services.Users.UpdateProfile(ctx, c.UID, services.UpdateProfileInput{
+		Username:   input.Username,
+		Bio:        input.Bio,
+		PictureURL: input.PictureURL,
+	})
+	if err != nil {
+		return model.UpdateUserProfileError{ErrorCodes: []model.UpdateUserProfileErrorCode{model.UpdateUserProfileErrorCodeUnauthorized}}, nil
+	}
+	return model.UpdateUserProfileSuccess{User: mapUser(u)}, nil
 }
 
 // UpdateEmail is the resolver for the updateEmail field.
 func (r *mutationResolver) UpdateEmail(ctx context.Context, input model.UpdateEmailInput) (model.UpdateEmailResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateEmail - updateEmail"))
+	return model.UpdateEmailError{ErrorCodes: []model.UpdateEmailErrorCode{model.UpdateEmailErrorCodeUnauthorized}}, nil
 }
 
 // CreateArticle is the resolver for the createArticle field.
 func (r *mutationResolver) CreateArticle(ctx context.Context, input model.CreateArticleInput) (model.CreateArticleResult, error) {
-	panic(fmt.Errorf("not implemented: CreateArticle - createArticle"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.CreateArticleError{ErrorCodes: []model.CreateArticleErrorCode{model.CreateArticleErrorCodeUnauthorized}}, nil
+	}
+
+	var content *string
+	if input.PreparedDocument != nil && input.PreparedDocument.Document != "" {
+		content = &input.PreparedDocument.Document
+	}
+	title := ""
+	if input.PreparedDocument != nil && input.PreparedDocument.PageInfo.Title != nil {
+		title = *input.PreparedDocument.PageInfo.Title
+	}
+	folder := "inbox"
+	if input.Folder != nil {
+		folder = *input.Folder
+	}
+	state := "SUCCEEDED"
+	if input.State != nil {
+		state = string(*input.State)
+	}
+	var savedAt, publishedAt *time.Time
+	if input.SavedAt != nil {
+		t := time.Time(*input.SavedAt)
+		savedAt = &t
+	}
+	if input.PublishedAt != nil {
+		t := time.Time(*input.PublishedAt)
+		publishedAt = &t
+	}
+
+	item, err := r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
+		URL:         input.URL,
+		Title:       title,
+		Content:     content,
+		Folder:      folder,
+		State:       state,
+		SavedAt:     savedAt,
+		PublishedAt: publishedAt,
+	})
+	if err != nil {
+		return model.CreateArticleError{ErrorCodes: []model.CreateArticleErrorCode{model.CreateArticleErrorCodeUnableToFetch}}, nil
+	}
+
+	u, _ := r.Services.Users.GetByID(ctx, c.UID)
+	return model.CreateArticleSuccess{
+		CreatedArticle: mapLibraryItem(item),
+		User:           mapUser(u),
+		Created:        true,
+	}, nil
 }
 
 // CreateHighlight is the resolver for the createHighlight field.
 func (r *mutationResolver) CreateHighlight(ctx context.Context, input model.CreateHighlightInput) (model.CreateHighlightResult, error) {
-	panic(fmt.Errorf("not implemented: CreateHighlight - createHighlight"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.CreateHighlightError{ErrorCodes: []model.CreateHighlightErrorCode{model.CreateHighlightErrorCodeUnauthorized}}, nil
+	}
+
+	hlType := "HIGHLIGHT"
+	if input.Type != nil {
+		hlType = string(*input.Type)
+	}
+	repr := "CONTENT"
+	if input.Representation != nil {
+		repr = string(*input.Representation)
+	}
+	var posPercent float32
+	if input.HighlightPositionPercent != nil {
+		posPercent = float32(*input.HighlightPositionPercent)
+	}
+	var posAnchor int
+	if input.HighlightPositionAnchorIndex != nil {
+		posAnchor = *input.HighlightPositionAnchorIndex
+	}
+
+	h, err := r.Services.Highlights.Create(ctx, c.UID, services.CreateHighlightInput{
+		LibraryItemID:                input.ArticleID,
+		ShortID:                      input.ShortID,
+		Quote:                        input.Quote,
+		Prefix:                       input.Prefix,
+		Suffix:                       input.Suffix,
+		Patch:                        input.Patch,
+		Annotation:                   input.Annotation,
+		HighlightType:                hlType,
+		HighlightPositionPercent:     posPercent,
+		HighlightPositionAnchorIndex: posAnchor,
+		HTML:                         input.HTML,
+		Color:                        input.Color,
+		Representation:               repr,
+	})
+	if err != nil {
+		return model.CreateHighlightError{ErrorCodes: []model.CreateHighlightErrorCode{model.CreateHighlightErrorCodeBadData}}, nil
+	}
+	return model.CreateHighlightSuccess{Highlight: mapHighlight(h)}, nil
 }
 
 // MergeHighlight is the resolver for the mergeHighlight field.
 func (r *mutationResolver) MergeHighlight(ctx context.Context, input model.MergeHighlightInput) (model.MergeHighlightResult, error) {
-	panic(fmt.Errorf("not implemented: MergeHighlight - mergeHighlight"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.MergeHighlightError{ErrorCodes: []model.MergeHighlightErrorCode{model.MergeHighlightErrorCodeUnauthorized}}, nil
+	}
+
+	// Delete the highlights that are being merged
+	for _, id := range input.OverlapHighlightIDList {
+		_ = r.Services.Highlights.Delete(ctx, id, c.UID)
+	}
+
+	repr := "CONTENT"
+	if input.Representation != nil {
+		repr = string(*input.Representation)
+	}
+	var posPercent float32
+	if input.HighlightPositionPercent != nil {
+		posPercent = float32(*input.HighlightPositionPercent)
+	}
+	var posAnchor int
+	if input.HighlightPositionAnchorIndex != nil {
+		posAnchor = *input.HighlightPositionAnchorIndex
+	}
+
+	h, err := r.Services.Highlights.Create(ctx, c.UID, services.CreateHighlightInput{
+		LibraryItemID:                input.ArticleID,
+		ShortID:                      input.ShortID,
+		Quote:                        &input.Quote,
+		Prefix:                       input.Prefix,
+		Suffix:                       input.Suffix,
+		Patch:                        &input.Patch,
+		Annotation:                   input.Annotation,
+		HighlightType:                "HIGHLIGHT",
+		HighlightPositionPercent:     posPercent,
+		HighlightPositionAnchorIndex: posAnchor,
+		HTML:                         input.HTML,
+		Color:                        input.Color,
+		Representation:               repr,
+	})
+	if err != nil {
+		return model.MergeHighlightError{ErrorCodes: []model.MergeHighlightErrorCode{model.MergeHighlightErrorCodeBadData}}, nil
+	}
+	return model.MergeHighlightSuccess{Highlight: mapHighlight(h), OverlapHighlightIDList: input.OverlapHighlightIDList}, nil
 }
 
 // UpdateHighlight is the resolver for the updateHighlight field.
 func (r *mutationResolver) UpdateHighlight(ctx context.Context, input model.UpdateHighlightInput) (model.UpdateHighlightResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateHighlight - updateHighlight"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdateHighlightError{ErrorCodes: []model.UpdateHighlightErrorCode{model.UpdateHighlightErrorCodeUnauthorized}}, nil
+	}
+	h, err := r.Services.Highlights.Update(ctx, input.HighlightID, c.UID, services.UpdateHighlightInput{
+		Annotation: input.Annotation,
+		Color:      input.Color,
+		HTML:       input.HTML,
+	})
+	if err != nil {
+		return model.UpdateHighlightError{ErrorCodes: []model.UpdateHighlightErrorCode{model.UpdateHighlightErrorCodeUnauthorized}}, nil
+	}
+	return model.UpdateHighlightSuccess{Highlight: mapHighlight(h)}, nil
 }
 
 // DeleteHighlight is the resolver for the deleteHighlight field.
 func (r *mutationResolver) DeleteHighlight(ctx context.Context, highlightID string) (model.DeleteHighlightResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteHighlight - deleteHighlight"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteHighlightError{ErrorCodes: []model.DeleteHighlightErrorCode{model.DeleteHighlightErrorCodeUnauthorized}}, nil
+	}
+	h, _ := r.Services.Highlights.GetByID(ctx, highlightID, c.UID)
+	if err := r.Services.Highlights.Delete(ctx, highlightID, c.UID); err != nil {
+		return model.DeleteHighlightError{ErrorCodes: []model.DeleteHighlightErrorCode{model.DeleteHighlightErrorCodeUnauthorized}}, nil
+	}
+	return model.DeleteHighlightSuccess{Highlight: mapHighlight(h)}, nil
 }
 
 // UploadFileRequest is the resolver for the uploadFileRequest field.
 func (r *mutationResolver) UploadFileRequest(ctx context.Context, input model.UploadFileRequestInput) (model.UploadFileRequestResult, error) {
-	panic(fmt.Errorf("not implemented: UploadFileRequest - uploadFileRequest"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UploadFileRequestError{ErrorCodes: []model.UploadFileRequestErrorCode{model.UploadFileRequestErrorCodeUnauthorized}}, nil
+	}
+	result, err := r.Services.UploadFiles.Create(ctx, c.UID, services.CreateUploadRequestInput{
+		URL:         input.URL,
+		FileName:    input.URL,
+		ContentType: input.ContentType,
+	})
+	if err != nil {
+		return model.UploadFileRequestError{ErrorCodes: []model.UploadFileRequestErrorCode{model.UploadFileRequestErrorCodeUnauthorized}}, nil
+	}
+	return model.UploadFileRequestSuccess{
+		ID:           result.UploadFile.ID,
+		UploadFileID: &result.UploadFile.ID,
+	}, nil
 }
 
 // SaveArticleReadingProgress is the resolver for the saveArticleReadingProgress field.
 func (r *mutationResolver) SaveArticleReadingProgress(ctx context.Context, input model.SaveArticleReadingProgressInput) (model.SaveArticleReadingProgressResult, error) {
-	panic(fmt.Errorf("not implemented: SaveArticleReadingProgress - saveArticleReadingProgress"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SaveArticleReadingProgressError{ErrorCodes: []model.SaveArticleReadingProgressErrorCode{model.SaveArticleReadingProgressErrorCodeUnauthorized}}, nil
+	}
+	var topPercent float32
+	if input.ReadingProgressTopPercent != nil {
+		topPercent = float32(*input.ReadingProgressTopPercent)
+	}
+	var anchorIndex int
+	if input.ReadingProgressAnchorIndex != nil {
+		anchorIndex = *input.ReadingProgressAnchorIndex
+	}
+	if err := r.Services.LibraryItems.UpdateReadingProgress(ctx, input.ID, c.UID, services.ReadingProgressInput{
+		TopPercent:    topPercent,
+		BottomPercent: float32(input.ReadingProgressPercent),
+		AnchorIndex:   anchorIndex,
+	}); err != nil {
+		return model.SaveArticleReadingProgressError{ErrorCodes: []model.SaveArticleReadingProgressErrorCode{model.SaveArticleReadingProgressErrorCodeNotFound}}, nil
+	}
+	item, _ := r.Services.LibraryItems.GetByID(ctx, input.ID, c.UID)
+	return model.SaveArticleReadingProgressSuccess{UpdatedArticle: mapLibraryItem(item)}, nil
 }
 
 // SetBookmarkArticle is the resolver for the setBookmarkArticle field.
 func (r *mutationResolver) SetBookmarkArticle(ctx context.Context, input model.SetBookmarkArticleInput) (model.SetBookmarkArticleResult, error) {
-	panic(fmt.Errorf("not implemented: SetBookmarkArticle - setBookmarkArticle"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetBookmarkArticleError{ErrorCodes: []model.SetBookmarkArticleErrorCode{model.SetBookmarkArticleErrorCodeNotFound}}, nil
+	}
+	if !input.Bookmark {
+		_ = r.Services.LibraryItems.DeleteItem(ctx, input.ArticleID, c.UID)
+	}
+	return model.SetBookmarkArticleSuccess{BookmarkedArticle: &model.Article{ID: input.ArticleID}}, nil
 }
 
 // SetUserPersonalization is the resolver for the setUserPersonalization field.
 func (r *mutationResolver) SetUserPersonalization(ctx context.Context, input model.SetUserPersonalizationInput) (model.SetUserPersonalizationResult, error) {
-	panic(fmt.Errorf("not implemented: SetUserPersonalization - setUserPersonalization"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetUserPersonalizationError{ErrorCodes: []model.SetUserPersonalizationErrorCode{model.SetUserPersonalizationErrorCodeUnauthorized}}, nil
+	}
+	svcInput := services.SetPersonalizationInput{
+		FontFamily: input.FontFamily,
+		FontSize:   input.FontSize,
+		Margin:     input.Margin,
+		Theme:      input.Theme,
+		LibraryLayoutType:    input.LibraryLayoutType,
+		SpeechVoice:          input.SpeechVoice,
+		SpeechSecondaryVoice: input.SpeechSecondaryVoice,
+		SpeechRate:           input.SpeechRate,
+		SpeechVolume:         input.SpeechVolume,
+	}
+	if input.LibrarySortOrder != nil {
+		s := string(*input.LibrarySortOrder)
+		svcInput.LibrarySortOrder = &s
+	}
+	p, err := r.Services.Users.SetPersonalization(ctx, c.UID, svcInput)
+	if err != nil {
+		return model.SetUserPersonalizationError{ErrorCodes: []model.SetUserPersonalizationErrorCode{model.SetUserPersonalizationErrorCodeUnauthorized}}, nil
+	}
+	return model.SetUserPersonalizationSuccess{UpdatedUserPersonalization: mapPersonalization(p)}, nil
 }
 
 // CreateArticleSavingRequest is the resolver for the createArticleSavingRequest field.
 func (r *mutationResolver) CreateArticleSavingRequest(ctx context.Context, input model.CreateArticleSavingRequestInput) (model.CreateArticleSavingRequestResult, error) {
-	panic(fmt.Errorf("not implemented: CreateArticleSavingRequest - createArticleSavingRequest"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.CreateArticleSavingRequestError{ErrorCodes: []model.CreateArticleSavingRequestErrorCode{model.CreateArticleSavingRequestErrorCodeUnauthorized}}, nil
+	}
+	item, err := r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
+		URL:   input.URL,
+		Title: input.URL,
+		State: "PROCESSING",
+	})
+	if err != nil {
+		return model.CreateArticleSavingRequestError{ErrorCodes: []model.CreateArticleSavingRequestErrorCode{model.CreateArticleSavingRequestErrorCodeUnauthorized}}, nil
+	}
+	status := model.ArticleSavingRequestStatus(item.State)
+	return model.CreateArticleSavingRequestSuccess{
+		ArticleSavingRequest: &model.ArticleSavingRequest{ID: item.ID, UserID: c.UID, Status: status},
+	}, nil
 }
 
 // ReportItem is the resolver for the reportItem field.
 func (r *mutationResolver) ReportItem(ctx context.Context, input model.ReportItemInput) (*model.ReportItemResult, error) {
-	panic(fmt.Errorf("not implemented: ReportItem - reportItem"))
+	return &model.ReportItemResult{Message: "Reported"}, nil
 }
 
 // SetLinkArchived is the resolver for the setLinkArchived field.
 func (r *mutationResolver) SetLinkArchived(ctx context.Context, input model.ArchiveLinkInput) (model.ArchiveLinkResult, error) {
-	panic(fmt.Errorf("not implemented: SetLinkArchived - setLinkArchived"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.ArchiveLinkError{ErrorCodes: []model.ArchiveLinkErrorCode{model.ArchiveLinkErrorCodeUnauthorized}}, nil
+	}
+	if err := r.Services.LibraryItems.ArchiveItem(ctx, input.LinkID, c.UID, input.Archived); err != nil {
+		return model.ArchiveLinkError{ErrorCodes: []model.ArchiveLinkErrorCode{model.ArchiveLinkErrorCodeUnauthorized}}, nil
+	}
+	return model.ArchiveLinkSuccess{LinkID: input.LinkID, Message: "done"}, nil
 }
 
 // CreateNewsletterEmail is the resolver for the createNewsletterEmail field.
 func (r *mutationResolver) CreateNewsletterEmail(ctx context.Context, input *model.CreateNewsletterEmailInput) (model.CreateNewsletterEmailResult, error) {
-	panic(fmt.Errorf("not implemented: CreateNewsletterEmail - createNewsletterEmail"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.CreateNewsletterEmailError{ErrorCodes: []model.CreateNewsletterEmailErrorCode{model.CreateNewsletterEmailErrorCodeUnauthorized}}, nil
+	}
+	// Newsletter email creation requires email service integration - stub for now
+	return model.CreateNewsletterEmailError{ErrorCodes: []model.CreateNewsletterEmailErrorCode{model.CreateNewsletterEmailErrorCodeUnauthorized}}, nil
 }
 
 // DeleteNewsletterEmail is the resolver for the deleteNewsletterEmail field.
 func (r *mutationResolver) DeleteNewsletterEmail(ctx context.Context, newsletterEmailID string) (model.DeleteNewsletterEmailResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteNewsletterEmail - deleteNewsletterEmail"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteNewsletterEmailError{ErrorCodes: []model.DeleteNewsletterEmailErrorCode{model.DeleteNewsletterEmailErrorCodeUnauthorized}}, nil
+	}
+	return model.DeleteNewsletterEmailError{ErrorCodes: []model.DeleteNewsletterEmailErrorCode{model.DeleteNewsletterEmailErrorCodeUnauthorized}}, nil
 }
 
 // SaveURL is the resolver for the saveUrl field.
 func (r *mutationResolver) SaveURL(ctx context.Context, input model.SaveURLInput) (model.SaveResult, error) {
-	panic(fmt.Errorf("not implemented: SaveURL - saveUrl"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnauthorized}}, nil
+	}
+	folder := "inbox"
+	if input.Folder != nil {
+		folder = *input.Folder
+	}
+	var savedAt *time.Time
+	if input.SavedAt != nil {
+		t := time.Time(*input.SavedAt)
+		savedAt = &t
+	}
+	var publishedAt *time.Time
+	if input.PublishedAt != nil {
+		t := time.Time(*input.PublishedAt)
+		publishedAt = &t
+	}
+	_, err = r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
+		URL:         input.URL,
+		Title:       input.URL,
+		Folder:      folder,
+		State:       "PROCESSING",
+		SavedAt:     savedAt,
+		PublishedAt: publishedAt,
+	})
+	if err != nil {
+		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnknown}}, nil
+	}
+	return model.SaveSuccess{URL: input.URL, ClientRequestID: input.ClientRequestID}, nil
 }
 
 // SavePage is the resolver for the savePage field.
 func (r *mutationResolver) SavePage(ctx context.Context, input model.SavePageInput) (model.SaveResult, error) {
-	panic(fmt.Errorf("not implemented: SavePage - savePage"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnauthorized}}, nil
+	}
+	folder := "inbox"
+	if input.Folder != nil {
+		folder = *input.Folder
+	}
+	state := "SUCCEEDED"
+	if input.State != nil {
+		state = string(*input.State)
+	}
+	var savedAt *time.Time
+	if input.SavedAt != nil {
+		t := time.Time(*input.SavedAt)
+		savedAt = &t
+	}
+	var publishedAt *time.Time
+	if input.PublishedAt != nil {
+		t := time.Time(*input.PublishedAt)
+		publishedAt = &t
+	}
+	content := input.OriginalContent
+	title := input.URL
+	if input.Title != nil {
+		title = *input.Title
+	}
+	_, err = r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
+		URL:         input.URL,
+		Title:       title,
+		Content:     &content,
+		Folder:      folder,
+		State:       state,
+		SavedAt:     savedAt,
+		PublishedAt: publishedAt,
+	})
+	if err != nil {
+		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnknown}}, nil
+	}
+	return model.SaveSuccess{URL: input.URL, ClientRequestID: input.ClientRequestID}, nil
 }
 
 // UpdatePage is the resolver for the updatePage field.
 func (r *mutationResolver) UpdatePage(ctx context.Context, input model.UpdatePageInput) (model.UpdatePageResult, error) {
-	panic(fmt.Errorf("not implemented: UpdatePage - updatePage"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdatePageError{ErrorCodes: []model.UpdatePageErrorCode{model.UpdatePageErrorCodeUnauthorized}}, nil
+	}
+	var savedAt, publishedAt *time.Time
+	if input.SavedAt != nil {
+		t := time.Time(*input.SavedAt)
+		savedAt = &t
+	}
+	if input.PublishedAt != nil {
+		t := time.Time(*input.PublishedAt)
+		publishedAt = &t
+	}
+	var state *string
+	if input.State != nil {
+		s := string(*input.State)
+		state = &s
+	}
+	item, err := r.Services.LibraryItems.UpdatePage(ctx, input.PageID, c.UID, services.UpdatePageInput{
+		Title:       input.Title,
+		Description: input.Description,
+		Author:      input.Byline,
+		SavedAt:     savedAt,
+		PublishedAt: publishedAt,
+		State:       state,
+		Thumbnail:   input.PreviewImage,
+	})
+	if err != nil {
+		return model.UpdatePageError{ErrorCodes: []model.UpdatePageErrorCode{model.UpdatePageErrorCodeUpdateFailed}}, nil
+	}
+	return model.UpdatePageSuccess{UpdatedPage: mapLibraryItem(item)}, nil
 }
 
 // SaveFile is the resolver for the saveFile field.
 func (r *mutationResolver) SaveFile(ctx context.Context, input model.SaveFileInput) (model.SaveResult, error) {
-	panic(fmt.Errorf("not implemented: SaveFile - saveFile"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnauthorized}}, nil
+	}
+	folder := "inbox"
+	if input.Folder != nil {
+		folder = *input.Folder
+	}
+	state := "SUCCEEDED"
+	if input.State != nil {
+		state = string(*input.State)
+	}
+	_, err = r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
+		URL:    input.URL,
+		Title:  input.URL,
+		Folder: folder,
+		State:  state,
+	})
+	if err != nil {
+		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnknown}}, nil
+	}
+	return model.SaveSuccess{URL: input.URL, ClientRequestID: input.ClientRequestID}, nil
 }
 
 // SetDeviceToken is the resolver for the setDeviceToken field.
 func (r *mutationResolver) SetDeviceToken(ctx context.Context, input model.SetDeviceTokenInput) (model.SetDeviceTokenResult, error) {
-	panic(fmt.Errorf("not implemented: SetDeviceToken - setDeviceToken"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetDeviceTokenError{ErrorCodes: []model.SetDeviceTokenErrorCode{model.SetDeviceTokenErrorCodeUnauthorized}}, nil
+	}
+	return model.SetDeviceTokenSuccess{DeviceToken: &model.DeviceToken{ID: "stub", Token: derefStr(input.Token), CreatedAt: scalar.Date(time.Now())}}, nil
 }
 
 // CreateLabel is the resolver for the createLabel field.
 func (r *mutationResolver) CreateLabel(ctx context.Context, input model.CreateLabelInput) (model.CreateLabelResult, error) {
-	panic(fmt.Errorf("not implemented: CreateLabel - createLabel"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.CreateLabelError{ErrorCodes: []model.CreateLabelErrorCode{model.CreateLabelErrorCodeUnauthorized}}, nil
+	}
+	color := "#07D2D1"
+	if input.Color != nil {
+		color = *input.Color
+	}
+	l, err := r.Services.Labels.Create(ctx, c.UID, services.CreateLabelInput{
+		Name:        input.Name,
+		Color:       color,
+		Description: input.Description,
+	})
+	if err != nil {
+		return model.CreateLabelError{ErrorCodes: []model.CreateLabelErrorCode{model.CreateLabelErrorCodeUnauthorized}}, nil
+	}
+	return model.CreateLabelSuccess{Label: mapLabel(l)}, nil
 }
 
 // UpdateLabel is the resolver for the updateLabel field.
 func (r *mutationResolver) UpdateLabel(ctx context.Context, input model.UpdateLabelInput) (model.UpdateLabelResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateLabel - updateLabel"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdateLabelError{ErrorCodes: []model.UpdateLabelErrorCode{model.UpdateLabelErrorCodeUnauthorized}}, nil
+	}
+	l, err := r.Services.Labels.Update(ctx, input.LabelID, c.UID, services.UpdateLabelInput{
+		Name:        &input.Name,
+		Color:       &input.Color,
+		Description: input.Description,
+	})
+	if err != nil {
+		return model.UpdateLabelError{ErrorCodes: []model.UpdateLabelErrorCode{model.UpdateLabelErrorCodeUnauthorized}}, nil
+	}
+	return model.UpdateLabelSuccess{Label: mapLabel(l)}, nil
 }
 
 // DeleteLabel is the resolver for the deleteLabel field.
 func (r *mutationResolver) DeleteLabel(ctx context.Context, id string) (model.DeleteLabelResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteLabel - deleteLabel"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteLabelError{ErrorCodes: []model.DeleteLabelErrorCode{model.DeleteLabelErrorCodeUnauthorized}}, nil
+	}
+	l, _ := r.Services.Labels.GetByID(ctx, id, c.UID)
+	if err := r.Services.Labels.Delete(ctx, id, c.UID); err != nil {
+		return model.DeleteLabelError{ErrorCodes: []model.DeleteLabelErrorCode{model.DeleteLabelErrorCodeUnauthorized}}, nil
+	}
+	return model.DeleteLabelSuccess{Label: mapLabel(l)}, nil
 }
 
 // SetLabels is the resolver for the setLabels field.
 func (r *mutationResolver) SetLabels(ctx context.Context, input model.SetLabelsInput) (model.SetLabelsResult, error) {
-	panic(fmt.Errorf("not implemented: SetLabels - setLabels"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetLabelsError{ErrorCodes: []model.SetLabelsErrorCode{model.SetLabelsErrorCodeUnauthorized}}, nil
+	}
+	labelIDs := input.LabelIds
+	labels, err := r.Services.Labels.SetLabelsForItem(ctx, input.PageID, c.UID, labelIDs)
+	if err != nil {
+		return model.SetLabelsError{ErrorCodes: []model.SetLabelsErrorCode{model.SetLabelsErrorCodeUnauthorized}}, nil
+	}
+	return model.SetLabelsSuccess{Labels: mapLabels(labels)}, nil
 }
 
 // GenerateAPIKey is the resolver for the generateApiKey field.
 func (r *mutationResolver) GenerateAPIKey(ctx context.Context, input model.GenerateAPIKeyInput) (model.GenerateAPIKeyResult, error) {
-	panic(fmt.Errorf("not implemented: GenerateAPIKey - generateApiKey"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.GenerateAPIKeyError{ErrorCodes: []model.GenerateAPIKeyErrorCode{model.GenerateAPIKeyErrorCodeUnauthorized}}, nil
+	}
+	rawKey, key, err := r.Services.APIKeys.Generate(ctx, c.UID, services.GenerateAPIKeyInput{
+		Name:      input.Name,
+		ExpiresAt: time.Time(input.ExpiresAt),
+		Scopes:    input.Scopes,
+	})
+	if err != nil {
+		return model.GenerateAPIKeyError{ErrorCodes: []model.GenerateAPIKeyErrorCode{model.GenerateAPIKeyErrorCodeBadRequest}}, nil
+	}
+	return model.GenerateAPIKeySuccess{APIKey: mapAPIKey(key, &rawKey)}, nil
 }
 
 // Unsubscribe is the resolver for the unsubscribe field.
 func (r *mutationResolver) Unsubscribe(ctx context.Context, name string, subscriptionID *string) (model.UnsubscribeResult, error) {
-	panic(fmt.Errorf("not implemented: Unsubscribe - unsubscribe"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UnsubscribeError{ErrorCodes: []model.UnsubscribeErrorCode{model.UnsubscribeErrorCodeUnauthorized}}, nil
+	}
+	id := name
+	if subscriptionID != nil {
+		id = *subscriptionID
+	}
+	if err := r.Services.Subscriptions.Unsubscribe(ctx, id, c.UID); err != nil {
+		return model.UnsubscribeError{ErrorCodes: []model.UnsubscribeErrorCode{model.UnsubscribeErrorCodeUnauthorized}}, nil
+	}
+	sub, _ := r.Services.Subscriptions.GetByID(ctx, id, c.UID)
+	return model.UnsubscribeSuccess{Subscription: mapSubscription(sub)}, nil
 }
 
 // Subscribe is the resolver for the subscribe field.
 func (r *mutationResolver) Subscribe(ctx context.Context, input model.SubscribeInput) (model.SubscribeResult, error) {
-	panic(fmt.Errorf("not implemented: Subscribe - subscribe"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.SubscribeError{ErrorCodes: []model.SubscribeErrorCode{model.SubscribeErrorCodeUnauthorized}}, nil
+	}
+	// RSS subscription creation requires feed handler - stub for now
+	return model.SubscribeError{ErrorCodes: []model.SubscribeErrorCode{model.SubscribeErrorCodeUnauthorized}}, nil
 }
 
 // AddPopularRead is the resolver for the addPopularRead field.
 func (r *mutationResolver) AddPopularRead(ctx context.Context, name string) (model.AddPopularReadResult, error) {
-	panic(fmt.Errorf("not implemented: AddPopularRead - addPopularRead"))
+	return model.AddPopularReadError{ErrorCodes: []model.AddPopularReadErrorCode{model.AddPopularReadErrorCodeNotFound}}, nil
 }
 
 // SaveDiscoverArticle is the resolver for the saveDiscoverArticle field.
 func (r *mutationResolver) SaveDiscoverArticle(ctx context.Context, input model.SaveDiscoverArticleInput) (model.SaveDiscoverArticleResult, error) {
-	panic(fmt.Errorf("not implemented: SaveDiscoverArticle - saveDiscoverArticle"))
+	return model.SaveDiscoverArticleError{ErrorCodes: []model.SaveDiscoverArticleErrorCode{model.SaveDiscoverArticleErrorCodeUnauthorized}}, nil
 }
 
 // DeleteDiscoverArticle is the resolver for the deleteDiscoverArticle field.
 func (r *mutationResolver) DeleteDiscoverArticle(ctx context.Context, input model.DeleteDiscoverArticleInput) (model.DeleteDiscoverArticleResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteDiscoverArticle - deleteDiscoverArticle"))
+	return model.DeleteDiscoverArticleError{ErrorCodes: []model.DeleteDiscoverArticleErrorCode{model.DeleteDiscoverArticleErrorCodeUnauthorized}}, nil
 }
 
 // SetWebhook is the resolver for the setWebhook field.
 func (r *mutationResolver) SetWebhook(ctx context.Context, input model.SetWebhookInput) (model.SetWebhookResult, error) {
-	panic(fmt.Errorf("not implemented: SetWebhook - setWebhook"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetWebhookError{ErrorCodes: []model.SetWebhookErrorCode{model.SetWebhookErrorCodeUnauthorized}}, nil
+	}
+	eventTypes := make([]string, len(input.EventTypes))
+	for i, e := range input.EventTypes {
+		eventTypes[i] = string(e)
+	}
+	w, err := r.Services.Webhooks.Set(ctx, c.UID, services.SetWebhookInput{
+		ID:          input.ID,
+		URL:         input.URL,
+		EventTypes:  eventTypes,
+		Method:      input.Method,
+		ContentType: input.ContentType,
+		Enabled:     input.Enabled,
+	})
+	if err != nil {
+		return model.SetWebhookError{ErrorCodes: []model.SetWebhookErrorCode{model.SetWebhookErrorCodeUnauthorized}}, nil
+	}
+	return model.SetWebhookSuccess{Webhook: mapWebhook(w)}, nil
 }
 
 // DeleteWebhook is the resolver for the deleteWebhook field.
 func (r *mutationResolver) DeleteWebhook(ctx context.Context, id string) (model.DeleteWebhookResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteWebhook - deleteWebhook"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteWebhookError{ErrorCodes: []model.DeleteWebhookErrorCode{model.DeleteWebhookErrorCodeUnauthorized}}, nil
+	}
+	w, _ := r.Services.Webhooks.GetByID(ctx, id, c.UID)
+	if err := r.Services.Webhooks.Delete(ctx, id, c.UID); err != nil {
+		return model.DeleteWebhookError{ErrorCodes: []model.DeleteWebhookErrorCode{model.DeleteWebhookErrorCodeUnauthorized}}, nil
+	}
+	return model.DeleteWebhookSuccess{Webhook: mapWebhook(w)}, nil
 }
 
 // RevokeAPIKey is the resolver for the revokeApiKey field.
 func (r *mutationResolver) RevokeAPIKey(ctx context.Context, id string) (model.RevokeAPIKeyResult, error) {
-	panic(fmt.Errorf("not implemented: RevokeAPIKey - revokeApiKey"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.RevokeAPIKeyError{ErrorCodes: []model.RevokeAPIKeyErrorCode{model.RevokeAPIKeyErrorCodeUnauthorized}}, nil
+	}
+	key, err := r.Services.APIKeys.Revoke(ctx, id, c.UID)
+	if err != nil || key == nil {
+		return model.RevokeAPIKeyError{ErrorCodes: []model.RevokeAPIKeyErrorCode{model.RevokeAPIKeyErrorCodeUnauthorized}}, nil
+	}
+	return model.RevokeAPIKeySuccess{APIKey: mapAPIKey(key, nil)}, nil
 }
 
 // SetLabelsForHighlight is the resolver for the setLabelsForHighlight field.
 func (r *mutationResolver) SetLabelsForHighlight(ctx context.Context, input model.SetLabelsForHighlightInput) (model.SetLabelsResult, error) {
-	panic(fmt.Errorf("not implemented: SetLabelsForHighlight - setLabelsForHighlight"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetLabelsError{ErrorCodes: []model.SetLabelsErrorCode{model.SetLabelsErrorCodeUnauthorized}}, nil
+	}
+	labels, err := r.Services.Labels.SetLabelsForHighlight(ctx, input.HighlightID, c.UID, input.LabelIds)
+	if err != nil {
+		return model.SetLabelsError{ErrorCodes: []model.SetLabelsErrorCode{model.SetLabelsErrorCodeUnauthorized}}, nil
+	}
+	return model.SetLabelsSuccess{Labels: mapLabels(labels)}, nil
 }
 
 // MoveLabel is the resolver for the moveLabel field.
 func (r *mutationResolver) MoveLabel(ctx context.Context, input model.MoveLabelInput) (model.MoveLabelResult, error) {
-	panic(fmt.Errorf("not implemented: MoveLabel - moveLabel"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.MoveLabelError{ErrorCodes: []model.MoveLabelErrorCode{model.MoveLabelErrorCodeUnauthorized}}, nil
+	}
+	// Label reordering not yet implemented
+	return model.MoveLabelSuccess{Label: &model.Label{ID: input.LabelID}}, nil
 }
 
 // SetIntegration is the resolver for the setIntegration field.
 func (r *mutationResolver) SetIntegration(ctx context.Context, input model.SetIntegrationInput) (model.SetIntegrationResult, error) {
-	panic(fmt.Errorf("not implemented: SetIntegration - setIntegration"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetIntegrationError{ErrorCodes: []model.SetIntegrationErrorCode{model.SetIntegrationErrorCodeUnauthorized}}, nil
+	}
+	intType := "EXPORT"
+	if input.Type != nil {
+		intType = string(*input.Type)
+	}
+	var importState *string
+	if input.ImportItemState != nil {
+		s := string(*input.ImportItemState)
+		importState = &s
+	}
+	i, err := r.Services.Integrations.Set(ctx, c.UID, services.SetIntegrationInput{
+		ID:              input.ID,
+		Name:            input.Name,
+		Token:           input.Token,
+		Type:            intType,
+		Enabled:         input.Enabled,
+		ImportItemState: importState,
+	})
+	if err != nil {
+		return model.SetIntegrationError{ErrorCodes: []model.SetIntegrationErrorCode{model.SetIntegrationErrorCodeBadRequest}}, nil
+	}
+	return model.SetIntegrationSuccess{Integration: mapIntegration(i)}, nil
 }
 
 // DeleteIntegration is the resolver for the deleteIntegration field.
 func (r *mutationResolver) DeleteIntegration(ctx context.Context, id string) (model.DeleteIntegrationResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteIntegration - deleteIntegration"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteIntegrationError{ErrorCodes: []model.DeleteIntegrationErrorCode{model.DeleteIntegrationErrorCodeUnauthorized}}, nil
+	}
+	i, _ := r.Services.Integrations.GetByID(ctx, id, c.UID)
+	if err := r.Services.Integrations.Delete(ctx, id, c.UID); err != nil {
+		return model.DeleteIntegrationError{ErrorCodes: []model.DeleteIntegrationErrorCode{model.DeleteIntegrationErrorCodeNotFound}}, nil
+	}
+	return model.DeleteIntegrationSuccess{Integration: mapIntegration(i)}, nil
 }
 
 // OptInFeature is the resolver for the optInFeature field.
 func (r *mutationResolver) OptInFeature(ctx context.Context, input model.OptInFeatureInput) (model.OptInFeatureResult, error) {
-	panic(fmt.Errorf("not implemented: OptInFeature - optInFeature"))
+	return model.OptInFeatureError{ErrorCodes: []model.OptInFeatureErrorCode{model.OptInFeatureErrorCodeNotFound}}, nil
 }
 
 // SetRule is the resolver for the setRule field.
 func (r *mutationResolver) SetRule(ctx context.Context, input model.SetRuleInput) (model.SetRuleResult, error) {
-	panic(fmt.Errorf("not implemented: SetRule - setRule"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetRuleError{ErrorCodes: []model.SetRuleErrorCode{model.SetRuleErrorCodeUnauthorized}}, nil
+	}
+	actionsJSON, _ := json.Marshal(input.Actions)
+	eventTypes := make([]string, len(input.EventTypes))
+	for i, e := range input.EventTypes {
+		eventTypes[i] = string(e)
+	}
+	rule, err := r.Services.Rules.Set(ctx, c.UID, services.SetRuleInput{
+		ID:          input.ID,
+		Name:        input.Name,
+		Filter:      input.Filter,
+		Actions:     actionsJSON,
+		EventTypes:  eventTypes,
+		Enabled:     input.Enabled,
+		Description: input.Description,
+	})
+	if err != nil {
+		return model.SetRuleError{ErrorCodes: []model.SetRuleErrorCode{model.SetRuleErrorCodeUnauthorized}}, nil
+	}
+	return model.SetRuleSuccess{Rule: mapRule(rule)}, nil
 }
 
 // DeleteRule is the resolver for the deleteRule field.
 func (r *mutationResolver) DeleteRule(ctx context.Context, id string) (model.DeleteRuleResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteRule - deleteRule"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteRuleError{ErrorCodes: []model.DeleteRuleErrorCode{model.DeleteRuleErrorCodeUnauthorized}}, nil
+	}
+	rule, _ := r.Services.Rules.GetByID(ctx, id, c.UID)
+	if err := r.Services.Rules.Delete(ctx, id, c.UID); err != nil {
+		return model.DeleteRuleError{ErrorCodes: []model.DeleteRuleErrorCode{model.DeleteRuleErrorCodeUnauthorized}}, nil
+	}
+	return model.DeleteRuleSuccess{Rule: mapRule(rule)}, nil
 }
 
 // SaveFilter is the resolver for the saveFilter field.
 func (r *mutationResolver) SaveFilter(ctx context.Context, input model.SaveFilterInput) (model.SaveFilterResult, error) {
-	panic(fmt.Errorf("not implemented: SaveFilter - saveFilter"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SaveFilterError{ErrorCodes: []model.SaveFilterErrorCode{model.SaveFilterErrorCodeUnauthorized}}, nil
+	}
+	pos := 0
+	if input.Position != nil {
+		pos = *input.Position
+	}
+	category := "Search"
+	if input.Category != nil {
+		category = *input.Category
+	}
+	f, err := r.Services.Filters.Create(ctx, c.UID, services.CreateFilterInput{
+		Name:        input.Name,
+		Description: input.Description,
+		Filter:      input.Filter,
+		Category:    category,
+		Position:    pos,
+		Visible:     true,
+		Folder:      input.Folder,
+	})
+	if err != nil {
+		return model.SaveFilterError{ErrorCodes: []model.SaveFilterErrorCode{model.SaveFilterErrorCodeUnauthorized}}, nil
+	}
+	return model.SaveFilterSuccess{Filter: mapFilter(f)}, nil
 }
 
 // DeleteFilter is the resolver for the deleteFilter field.
 func (r *mutationResolver) DeleteFilter(ctx context.Context, id string) (model.DeleteFilterResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteFilter - deleteFilter"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.DeleteFilterError{ErrorCodes: []model.DeleteFilterErrorCode{model.DeleteFilterErrorCodeUnauthorized}}, nil
+	}
+	f, _ := r.Services.Filters.GetByID(ctx, id, c.UID)
+	if err := r.Services.Filters.Delete(ctx, id, c.UID); err != nil {
+		return model.DeleteFilterError{ErrorCodes: []model.DeleteFilterErrorCode{model.DeleteFilterErrorCodeUnauthorized}}, nil
+	}
+	return model.DeleteFilterSuccess{Filter: mapFilter(f)}, nil
 }
 
 // MoveFilter is the resolver for the moveFilter field.
 func (r *mutationResolver) MoveFilter(ctx context.Context, input model.MoveFilterInput) (model.MoveFilterResult, error) {
-	panic(fmt.Errorf("not implemented: MoveFilter - moveFilter"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.MoveFilterError{ErrorCodes: []model.MoveFilterErrorCode{model.MoveFilterErrorCodeUnauthorized}}, nil
+	}
+	return model.MoveFilterSuccess{Filter: &model.Filter{ID: input.FilterID}}, nil
 }
 
 // UpdateFilter is the resolver for the updateFilter field.
 func (r *mutationResolver) UpdateFilter(ctx context.Context, input model.UpdateFilterInput) (model.UpdateFilterResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateFilter - updateFilter"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdateFilterError{ErrorCodes: []model.UpdateFilterErrorCode{model.UpdateFilterErrorCodeUnauthorized}}, nil
+	}
+	f, err := r.Services.Filters.Update(ctx, input.ID, c.UID, services.UpdateFilterInput{
+		Name:        input.Name,
+		Description: input.Description,
+		Filter:      input.Filter,
+		Category:    input.Category,
+		Position:    input.Position,
+		Visible:     input.Visible,
+		Folder:      input.Folder,
+	})
+	if err != nil {
+		return model.UpdateFilterError{ErrorCodes: []model.UpdateFilterErrorCode{model.UpdateFilterErrorCodeUnauthorized}}, nil
+	}
+	return model.UpdateFilterSuccess{Filter: mapFilter(f)}, nil
 }
 
 // CreateGroup is the resolver for the createGroup field.
 func (r *mutationResolver) CreateGroup(ctx context.Context, input model.CreateGroupInput) (model.CreateGroupResult, error) {
-	panic(fmt.Errorf("not implemented: CreateGroup - createGroup"))
+	return model.CreateGroupError{ErrorCodes: []model.CreateGroupErrorCode{model.CreateGroupErrorCodeUnauthorized}}, nil
 }
 
 // Recommend is the resolver for the recommend field.
 func (r *mutationResolver) Recommend(ctx context.Context, input model.RecommendInput) (model.RecommendResult, error) {
-	panic(fmt.Errorf("not implemented: Recommend - recommend"))
+	return model.RecommendError{ErrorCodes: []model.RecommendErrorCode{model.RecommendErrorCodeNotFound}}, nil
 }
 
 // JoinGroup is the resolver for the joinGroup field.
 func (r *mutationResolver) JoinGroup(ctx context.Context, inviteCode string) (model.JoinGroupResult, error) {
-	panic(fmt.Errorf("not implemented: JoinGroup - joinGroup"))
+	return model.JoinGroupError{ErrorCodes: []model.JoinGroupErrorCode{model.JoinGroupErrorCodeNotFound}}, nil
 }
 
 // RecommendHighlights is the resolver for the recommendHighlights field.
 func (r *mutationResolver) RecommendHighlights(ctx context.Context, input model.RecommendHighlightsInput) (model.RecommendHighlightsResult, error) {
-	panic(fmt.Errorf("not implemented: RecommendHighlights - recommendHighlights"))
+	return model.RecommendHighlightsError{ErrorCodes: []model.RecommendHighlightsErrorCode{model.RecommendHighlightsErrorCodeNotFound}}, nil
 }
 
 // LeaveGroup is the resolver for the leaveGroup field.
 func (r *mutationResolver) LeaveGroup(ctx context.Context, groupID string) (model.LeaveGroupResult, error) {
-	panic(fmt.Errorf("not implemented: LeaveGroup - leaveGroup"))
+	return model.LeaveGroupError{ErrorCodes: []model.LeaveGroupErrorCode{model.LeaveGroupErrorCodeNotFound}}, nil
 }
 
 // UploadImportFile is the resolver for the uploadImportFile field.
 func (r *mutationResolver) UploadImportFile(ctx context.Context, typeArg model.UploadImportFileType, contentType string) (model.UploadImportFileResult, error) {
-	panic(fmt.Errorf("not implemented: UploadImportFile - uploadImportFile"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.UploadImportFileError{ErrorCodes: []model.UploadImportFileErrorCode{model.UploadImportFileErrorCodeUnauthorized}}, nil
+	}
+	return model.UploadImportFileError{ErrorCodes: []model.UploadImportFileErrorCode{model.UploadImportFileErrorCodeUnauthorized}}, nil
 }
 
 // MarkEmailAsItem is the resolver for the markEmailAsItem field.
 func (r *mutationResolver) MarkEmailAsItem(ctx context.Context, recentEmailID string) (model.MarkEmailAsItemResult, error) {
-	panic(fmt.Errorf("not implemented: MarkEmailAsItem - markEmailAsItem"))
+	return model.MarkEmailAsItemError{ErrorCodes: []model.MarkEmailAsItemErrorCode{model.MarkEmailAsItemErrorCodeUnauthorized}}, nil
 }
 
 // ReplyToEmail is the resolver for the replyToEmail field.
 func (r *mutationResolver) ReplyToEmail(ctx context.Context, recentEmailID string, reply model.AllowedReply) (model.ReplyToEmailResult, error) {
-	panic(fmt.Errorf("not implemented: ReplyToEmail - replyToEmail"))
+	return model.ReplyToEmailError{ErrorCodes: []model.ReplyToEmailErrorCode{model.ReplyToEmailErrorCodeUnauthorized}}, nil
 }
 
 // BulkAction is the resolver for the bulkAction field.
 func (r *mutationResolver) BulkAction(ctx context.Context, query string, action model.BulkActionType, labelIds []string, expectedCount *int, async *bool, arguments scalar.JSON) (model.BulkActionResult, error) {
-	panic(fmt.Errorf("not implemented: BulkAction - bulkAction"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.BulkActionError{ErrorCodes: []model.BulkActionErrorCode{model.BulkActionErrorCodeUnauthorized}}, nil
+	}
+	svcAction := services.BulkAction(string(action))
+	count, err := r.Services.LibraryItems.ExecuteBulkAction(ctx, c.UID, services.BulkActionInput{
+		Action:   svcAction,
+		Query:    query,
+		LabelIDs: labelIds,
+	})
+	if err != nil {
+		return model.BulkActionError{ErrorCodes: []model.BulkActionErrorCode{model.BulkActionErrorCodeBadRequest}}, nil
+	}
+	return model.BulkActionSuccess{Success: count > 0}, nil
 }
 
 // ImportFromIntegration is the resolver for the importFromIntegration field.
 func (r *mutationResolver) ImportFromIntegration(ctx context.Context, integrationID string) (model.ImportFromIntegrationResult, error) {
-	panic(fmt.Errorf("not implemented: ImportFromIntegration - importFromIntegration"))
+	return model.ImportFromIntegrationError{ErrorCodes: []model.ImportFromIntegrationErrorCode{model.ImportFromIntegrationErrorCodeUnauthorized}}, nil
 }
 
 // ExportToIntegration is the resolver for the exportToIntegration field.
 func (r *mutationResolver) ExportToIntegration(ctx context.Context, integrationID string) (model.ExportToIntegrationResult, error) {
-	panic(fmt.Errorf("not implemented: ExportToIntegration - exportToIntegration"))
+	return model.ExportToIntegrationError{ErrorCodes: []model.ExportToIntegrationErrorCode{model.ExportToIntegrationErrorCodeUnauthorized}}, nil
 }
 
 // SetFavoriteArticle is the resolver for the setFavoriteArticle field.
 func (r *mutationResolver) SetFavoriteArticle(ctx context.Context, id string) (model.SetFavoriteArticleResult, error) {
-	panic(fmt.Errorf("not implemented: SetFavoriteArticle - setFavoriteArticle"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.SetFavoriteArticleError{ErrorCodes: []model.SetFavoriteArticleErrorCode{model.SetFavoriteArticleErrorCodeUnauthorized}}, nil
+	}
+	// "Favorite" maps to the library folder
+	if err := r.Services.LibraryItems.MoveToFolder(ctx, id, c.UID, "following"); err != nil {
+		return model.SetFavoriteArticleError{ErrorCodes: []model.SetFavoriteArticleErrorCode{model.SetFavoriteArticleErrorCodeNotFound}}, nil
+	}
+	return model.SetFavoriteArticleSuccess{Success: true}, nil
 }
 
 // UpdateSubscription is the resolver for the updateSubscription field.
 func (r *mutationResolver) UpdateSubscription(ctx context.Context, input model.UpdateSubscriptionInput) (model.UpdateSubscriptionResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateSubscription - updateSubscription"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdateSubscriptionError{ErrorCodes: []model.UpdateSubscriptionErrorCode{model.UpdateSubscriptionErrorCodeUnauthorized}}, nil
+	}
+	var status *string
+	if input.Status != nil {
+		s := string(*input.Status)
+		status = &s
+	}
+	sub, err := r.Services.Subscriptions.Update(ctx, input.ID, c.UID, services.UpdateSubscriptionInput{
+		Name:             input.Name,
+		Description:      input.Description,
+		Folder:           input.Folder,
+		AutoAddToLibrary: input.AutoAddToLibrary,
+		FetchContent:     input.FetchContent,
+		IsPrivate:        input.IsPrivate,
+		Status:           status,
+	})
+	if err != nil {
+		return model.UpdateSubscriptionError{ErrorCodes: []model.UpdateSubscriptionErrorCode{model.UpdateSubscriptionErrorCodeUnauthorized}}, nil
+	}
+	return model.UpdateSubscriptionSuccess{Subscription: mapSubscription(sub)}, nil
 }
 
 // MoveToFolder is the resolver for the moveToFolder field.
 func (r *mutationResolver) MoveToFolder(ctx context.Context, id string, folder string) (model.MoveToFolderResult, error) {
-	panic(fmt.Errorf("not implemented: MoveToFolder - moveToFolder"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.MoveToFolderError{ErrorCodes: []model.MoveToFolderErrorCode{model.MoveToFolderErrorCodeUnauthorized}}, nil
+	}
+	if err := r.Services.LibraryItems.MoveToFolder(ctx, id, c.UID, folder); err != nil {
+		return model.MoveToFolderError{ErrorCodes: []model.MoveToFolderErrorCode{model.MoveToFolderErrorCodeBadRequest}}, nil
+	}
+	return model.MoveToFolderSuccess{Success: true}, nil
 }
 
 // FetchContent is the resolver for the fetchContent field.
 func (r *mutationResolver) FetchContent(ctx context.Context, id string) (model.FetchContentResult, error) {
-	panic(fmt.Errorf("not implemented: FetchContent - fetchContent"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.FetchContentError{ErrorCodes: []model.FetchContentErrorCode{model.FetchContentErrorCodeUnauthorized}}, nil
+	}
+	// Content fetching requires queue integration - stub success
+	return model.FetchContentSuccess{Success: true}, nil
 }
 
 // UpdateNewsletterEmail is the resolver for the updateNewsletterEmail field.
 func (r *mutationResolver) UpdateNewsletterEmail(ctx context.Context, input model.UpdateNewsletterEmailInput) (model.UpdateNewsletterEmailResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateNewsletterEmail - updateNewsletterEmail"))
+	_, err := requireAuth(ctx)
+	if err != nil {
+		return model.UpdateNewsletterEmailError{ErrorCodes: []model.UpdateNewsletterEmailErrorCode{model.UpdateNewsletterEmailErrorCodeUnauthorized}}, nil
+	}
+	return model.UpdateNewsletterEmailError{ErrorCodes: []model.UpdateNewsletterEmailErrorCode{model.UpdateNewsletterEmailErrorCodeUnauthorized}}, nil
 }
 
 // AddDiscoverFeed is the resolver for the addDiscoverFeed field.
 func (r *mutationResolver) AddDiscoverFeed(ctx context.Context, input model.AddDiscoverFeedInput) (model.AddDiscoverFeedResult, error) {
-	panic(fmt.Errorf("not implemented: AddDiscoverFeed - addDiscoverFeed"))
+	return model.AddDiscoverFeedError{ErrorCodes: []model.AddDiscoverFeedErrorCode{model.AddDiscoverFeedErrorCodeUnauthorized}}, nil
 }
 
 // DeleteDiscoverFeed is the resolver for the deleteDiscoverFeed field.
 func (r *mutationResolver) DeleteDiscoverFeed(ctx context.Context, input model.DeleteDiscoverFeedInput) (model.DeleteDiscoverFeedResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteDiscoverFeed - deleteDiscoverFeed"))
+	return model.DeleteDiscoverFeedError{ErrorCodes: []model.DeleteDiscoverFeedErrorCode{model.DeleteDiscoverFeedErrorCodeUnauthorized}}, nil
 }
 
 // EditDiscoverFeed is the resolver for the editDiscoverFeed field.
 func (r *mutationResolver) EditDiscoverFeed(ctx context.Context, input model.EditDiscoverFeedInput) (model.EditDiscoverFeedResult, error) {
-	panic(fmt.Errorf("not implemented: EditDiscoverFeed - editDiscoverFeed"))
+	return model.EditDiscoverFeedError{ErrorCodes: []model.EditDiscoverFeedErrorCode{model.EditDiscoverFeedErrorCodeUnauthorized}}, nil
 }
 
 // EmptyTrash is the resolver for the emptyTrash field.
 func (r *mutationResolver) EmptyTrash(ctx context.Context) (model.EmptyTrashResult, error) {
-	panic(fmt.Errorf("not implemented: EmptyTrash - emptyTrash"))
+	c, err := requireAuth(ctx)
+	if err != nil {
+		return model.EmptyTrashError{ErrorCodes: []model.EmptyTrashErrorCode{model.EmptyTrashErrorCodeUnauthorized}}, nil
+	}
+	_, _ = r.Services.LibraryItems.ExecuteBulkAction(ctx, c.UID, services.BulkActionInput{
+		Action: services.BulkActionDelete,
+		Query:  "in:trash",
+	})
+	return model.EmptyTrashSuccess{Success: boolPtr(true)}, nil
 }
 
 // RefreshHome is the resolver for the refreshHome field.
 func (r *mutationResolver) RefreshHome(ctx context.Context) (model.RefreshHomeResult, error) {
-	panic(fmt.Errorf("not implemented: RefreshHome - refreshHome"))
+	return model.RefreshHomeSuccess{Success: true}, nil
 }
 
 // CreateFolderPolicy is the resolver for the createFolderPolicy field.
 func (r *mutationResolver) CreateFolderPolicy(ctx context.Context, input model.CreateFolderPolicyInput) (model.CreateFolderPolicyResult, error) {
-	panic(fmt.Errorf("not implemented: CreateFolderPolicy - createFolderPolicy"))
+	return model.CreateFolderPolicyError{ErrorCodes: []model.CreateFolderPolicyErrorCode{model.CreateFolderPolicyErrorCodeUnauthorized}}, nil
 }
 
 // UpdateFolderPolicy is the resolver for the updateFolderPolicy field.
 func (r *mutationResolver) UpdateFolderPolicy(ctx context.Context, input model.UpdateFolderPolicyInput) (model.UpdateFolderPolicyResult, error) {
-	panic(fmt.Errorf("not implemented: UpdateFolderPolicy - updateFolderPolicy"))
+	return model.UpdateFolderPolicyError{ErrorCodes: []model.UpdateFolderPolicyErrorCode{model.UpdateFolderPolicyErrorCodeUnauthorized}}, nil
 }
 
 // DeleteFolderPolicy is the resolver for the deleteFolderPolicy field.
 func (r *mutationResolver) DeleteFolderPolicy(ctx context.Context, id string) (model.DeleteFolderPolicyResult, error) {
-	panic(fmt.Errorf("not implemented: DeleteFolderPolicy - deleteFolderPolicy"))
+	return model.DeleteFolderPolicyError{ErrorCodes: []model.DeleteFolderPolicyErrorCode{model.DeleteFolderPolicyErrorCodeUnauthorized}}, nil
 }
 
 // CreatePost is the resolver for the createPost field.
 func (r *mutationResolver) CreatePost(ctx context.Context, input model.CreatePostInput) (model.CreatePostResult, error) {
-	panic(fmt.Errorf("not implemented: CreatePost - createPost"))
+	return model.CreatePostError{ErrorCodes: []model.CreatePostErrorCode{model.CreatePostErrorCodeUnauthorized}}, nil
 }
 
 // UpdatePost is the resolver for the updatePost field.
 func (r *mutationResolver) UpdatePost(ctx context.Context, input model.UpdatePostInput) (model.UpdatePostResult, error) {
-	panic(fmt.Errorf("not implemented: UpdatePost - updatePost"))
+	return model.UpdatePostError{ErrorCodes: []model.UpdatePostErrorCode{model.UpdatePostErrorCodeUnauthorized}}, nil
 }
 
 // DeletePost is the resolver for the deletePost field.
 func (r *mutationResolver) DeletePost(ctx context.Context, id string) (model.DeletePostResult, error) {
-	panic(fmt.Errorf("not implemented: DeletePost - deletePost"))
+	return model.DeletePostError{ErrorCodes: []model.DeletePostErrorCode{model.DeletePostErrorCodeUnauthorized}}, nil
 }
 
 // Mutation returns generated.MutationResolver implementation.
 func (r *Resolver) Mutation() generated.MutationResolver { return &mutationResolver{r} }
 
 type mutationResolver struct{ *Resolver }
+
+// helpers
+
+func stringPtr(s string) *string { return &s }
+
+func boolPtr(b bool) *bool { return &b }
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

@@ -9,6 +9,8 @@ import (
 	"github.com/omnivore-app/omnivore/internal/api/graphql/resolver"
 	"github.com/omnivore-app/omnivore/internal/api/middleware"
 	"github.com/omnivore-app/omnivore/internal/api/rest/auth"
+	"github.com/omnivore-app/omnivore/internal/api/rest/public"
+	"github.com/omnivore-app/omnivore/internal/api/rest/svc"
 	"github.com/omnivore-app/omnivore/internal/api/services"
 	"github.com/omnivore-app/omnivore/internal/config"
 	"github.com/omnivore-app/omnivore/internal/db"
@@ -59,7 +61,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/reset-password", authH.ResetPassword)
 	mux.HandleFunc("POST /api/change-password", authH.ChangePassword)
 
-	// Internal service-to-service routes will be wired here in Phase 6.
+	// Public REST endpoints (used by mobile apps and extensions)
+	pubH := public.New(s.cfg, s.services)
+	pubH.Register(mux)
+
+	// Internal service-to-service routes (called by background workers)
+	svcH := svc.New(s.cfg, s.db, s.services)
+	svcH.Register(mux)
 
 	// GraphQL endpoint
 	gqlHandler := handler.NewDefaultServer(

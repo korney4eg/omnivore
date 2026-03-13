@@ -7,14 +7,15 @@ package resolver
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/omnivore-app/omnivore/internal/api/graphql/generated"
 )
 
 // Hello is the resolver for the hello field.
 func (r *subscriptionRootTypeResolver) Hello(ctx context.Context) (<-chan *string, error) {
-	panic(fmt.Errorf("not implemented: Hello - hello"))
+	ch := make(chan *string)
+	close(ch)
+	return ch, nil
 }
 
 // SubscriptionRootType returns generated.SubscriptionRootTypeResolver implementation.
