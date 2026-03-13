@@ -1,0 +1,28 @@
+schema:
+  - internal/api/graphql/schema/*.graphql
+
+exec:
+  filename: internal/api/graphql/generated/generated.go
+  package: generated
+
+model:
+  filename: internal/api/graphql/model/models_gen.go
+  package: model
+
+resolver:
+  layout: follow-schema
+  dir: internal/api/graphql/resolver
+  package: resolver
+  filename_template: "{name}.resolvers.go"
+
+models:
+  Date:
+    model: github.com/omnivore-app/omnivore/internal/api/graphql/scalar.Date
+  JSON:
+    model: github.com/omnivore-app/omnivore/internal/api/graphql/scalar.JSON
+
+directives:
+  sanitize:
+    skip_runtime: true
+  deprecated:
+    skip_runtime: true

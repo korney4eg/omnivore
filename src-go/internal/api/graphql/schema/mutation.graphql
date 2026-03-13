@@ -1,0 +1,121 @@
+type Mutation {
+    googleLogin(input: GoogleLoginInput!): LoginResult!
+    googleSignup(input: GoogleSignupInput!): GoogleSignupResult!
+    logOut: LogOutResult!
+    deleteAccount(userID: ID!): DeleteAccountResult!
+    updateUser(input: UpdateUserInput!): UpdateUserResult!
+    updateUserProfile(input: UpdateUserProfileInput!): UpdateUserProfileResult!
+    updateEmail(input: UpdateEmailInput!): UpdateEmailResult!
+    createArticle(input: CreateArticleInput!): CreateArticleResult!
+    createHighlight(input: CreateHighlightInput!): CreateHighlightResult!
+    mergeHighlight(input: MergeHighlightInput!): MergeHighlightResult!
+    updateHighlight(input: UpdateHighlightInput!): UpdateHighlightResult!
+    deleteHighlight(highlightId: ID!): DeleteHighlightResult!
+    uploadFileRequest(input: UploadFileRequestInput!): UploadFileRequestResult!
+    saveArticleReadingProgress(
+      input: SaveArticleReadingProgressInput!
+    ): SaveArticleReadingProgressResult!
+    setBookmarkArticle(
+      input: SetBookmarkArticleInput!
+    ): SetBookmarkArticleResult!
+    setUserPersonalization(
+      input: SetUserPersonalizationInput!
+    ): SetUserPersonalizationResult!
+    createArticleSavingRequest(
+      input: CreateArticleSavingRequestInput!
+    ): CreateArticleSavingRequestResult!
+    reportItem(input: ReportItemInput!): ReportItemResult!
+    setLinkArchived(input: ArchiveLinkInput!): ArchiveLinkResult!
+    createNewsletterEmail(
+      input: CreateNewsletterEmailInput
+    ): CreateNewsletterEmailResult!
+    deleteNewsletterEmail(newsletterEmailId: ID!): DeleteNewsletterEmailResult!
+    saveUrl(input: SaveUrlInput!): SaveResult!
+    savePage(input: SavePageInput!): SaveResult!
+    updatePage(input: UpdatePageInput!): UpdatePageResult!
+    saveFile(input: SaveFileInput!): SaveResult!
+    # createReminder(input: CreateReminderInput!): CreateReminderResult!
+    # updateReminder(input: UpdateReminderInput!): UpdateReminderResult!
+    # deleteReminder(id: ID!): DeleteReminderResult!
+    setDeviceToken(input: SetDeviceTokenInput!): SetDeviceTokenResult!
+    createLabel(input: CreateLabelInput!): CreateLabelResult!
+    updateLabel(input: UpdateLabelInput!): UpdateLabelResult!
+    deleteLabel(id: ID!): DeleteLabelResult!
+    setLabels(input: SetLabelsInput!): SetLabelsResult!
+    generateApiKey(input: GenerateApiKeyInput!): GenerateApiKeyResult!
+    unsubscribe(name: String!, subscriptionId: ID): UnsubscribeResult!
+    subscribe(input: SubscribeInput!): SubscribeResult!
+    addPopularRead(name: String!): AddPopularReadResult!
+    saveDiscoverArticle(
+      input: SaveDiscoverArticleInput!
+    ): SaveDiscoverArticleResult!
+    deleteDiscoverArticle(
+      input: DeleteDiscoverArticleInput!
+    ): DeleteDiscoverArticleResult!
+    setWebhook(input: SetWebhookInput!): SetWebhookResult!
+    deleteWebhook(id: ID!): DeleteWebhookResult!
+    revokeApiKey(id: ID!): RevokeApiKeyResult!
+    setLabelsForHighlight(input: SetLabelsForHighlightInput!): SetLabelsResult!
+    moveLabel(input: MoveLabelInput!): MoveLabelResult!
+    setIntegration(input: SetIntegrationInput!): SetIntegrationResult!
+    deleteIntegration(id: ID!): DeleteIntegrationResult!
+    optInFeature(input: OptInFeatureInput!): OptInFeatureResult!
+    setRule(input: SetRuleInput!): SetRuleResult!
+    deleteRule(id: ID!): DeleteRuleResult!
+    saveFilter(input: SaveFilterInput!): SaveFilterResult!
+    deleteFilter(id: ID!): DeleteFilterResult!
+    moveFilter(input: MoveFilterInput!): MoveFilterResult!
+    updateFilter(input: UpdateFilterInput!): UpdateFilterResult!
+    createGroup(input: CreateGroupInput!): CreateGroupResult!
+    recommend(input: RecommendInput!): RecommendResult!
+    joinGroup(inviteCode: String!): JoinGroupResult!
+    recommendHighlights(
+      input: RecommendHighlightsInput!
+    ): RecommendHighlightsResult!
+    leaveGroup(groupId: ID!): LeaveGroupResult!
+    uploadImportFile(
+      type: UploadImportFileType!
+      contentType: String!
+    ): UploadImportFileResult!
+    markEmailAsItem(recentEmailId: ID!): MarkEmailAsItemResult!
+    replyToEmail(recentEmailId: ID!, reply: AllowedReply!): ReplyToEmailResult!
+    bulkAction(
+      query: String!
+      action: BulkActionType!
+      labelIds: [ID!]
+      expectedCount: Int # max number of items to process
+      async: Boolean # if true, return immediately and process in the background
+      arguments: JSON # additional arguments for the action
+    ): BulkActionResult!
+    importFromIntegration(integrationId: ID!): ImportFromIntegrationResult!
+    exportToIntegration(integrationId: ID!): ExportToIntegrationResult!
+    setFavoriteArticle(id: ID!): SetFavoriteArticleResult!
+    updateSubscription(
+      input: UpdateSubscriptionInput!
+    ): UpdateSubscriptionResult!
+    moveToFolder(id: ID!, folder: String!): MoveToFolderResult!
+    fetchContent(id: ID!): FetchContentResult!
+    updateNewsletterEmail(
+      input: UpdateNewsletterEmailInput!
+    ): UpdateNewsletterEmailResult!
+    addDiscoverFeed(input: AddDiscoverFeedInput!): AddDiscoverFeedResult!
+    deleteDiscoverFeed(
+      input: DeleteDiscoverFeedInput!
+    ): DeleteDiscoverFeedResult!
+    editDiscoverFeed(input: EditDiscoverFeedInput!): EditDiscoverFeedResult!
+    emptyTrash: EmptyTrashResult!
+    refreshHome: RefreshHomeResult!
+    createFolderPolicy(
+      input: CreateFolderPolicyInput!
+    ): CreateFolderPolicyResult!
+    updateFolderPolicy(
+      input: UpdateFolderPolicyInput!
+    ): UpdateFolderPolicyResult!
+    deleteFolderPolicy(id: ID!): DeleteFolderPolicyResult!
+    createPost(input: CreatePostInput!): CreatePostResult!
+    updatePost(input: UpdatePostInput!): UpdatePostResult!
+    deletePost(id: ID!): DeletePostResult!
+  }
+
+  # FIXME: remove sort from feedArticles after all cached tabs are closed
+  # FIXME: sharedOnly is legacy

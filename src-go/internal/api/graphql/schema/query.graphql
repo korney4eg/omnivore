@@ -1,0 +1,69 @@
+type Query {
+    hello: String
+    me: User
+    user(userId: ID, username: String): UserResult!
+    article(username: String!, slug: String!, format: String): ArticleResult!
+    users: UsersResult!
+    validateUsername(username: String!): Boolean!
+    # getFollowers(userId: ID): GetFollowersResult!
+    # getFollowing(userId: ID): GetFollowingResult!
+    getUserPersonalization: GetUserPersonalizationResult!
+    articleSavingRequest(id: ID, url: String): ArticleSavingRequestResult!
+    newsletterEmails: NewsletterEmailsResult!
+    # reminder(linkId: ID!): ReminderResult!
+    labels: LabelsResult!
+    search(
+      after: String
+      first: Int
+      query: String
+      includeContent: Boolean
+      format: String
+    ): SearchResult!
+    getDiscoverFeedArticles(
+      discoverTopicId: String!
+      feedId: ID
+      after: String
+      first: Int
+    ): GetDiscoverFeedArticleResults!
+    discoverTopics: GetDiscoverTopicResults!
+    subscriptions(
+      sort: SortParams
+      type: SubscriptionType
+    ): SubscriptionsResult!
+    sendInstallInstructions: SendInstallInstructionsResult!
+    webhooks: WebhooksResult!
+    webhook(id: ID!): WebhookResult!
+    apiKeys: ApiKeysResult!
+    typeaheadSearch(query: String!, first: Int): TypeaheadSearchResult!
+    updatesSince(
+      after: String
+      first: Int
+      since: Date!
+      sort: SortParams
+      folder: String
+    ): UpdatesSinceResult!
+    integration(name: String!): IntegrationResult!
+    integrations: IntegrationsResult!
+    recentSearches: RecentSearchesResult!
+    rules(enabled: Boolean): RulesResult!
+    deviceTokens: DeviceTokensResult!
+    filters: FiltersResult!
+    groups: GroupsResult!
+    recentEmails: RecentEmailsResult!
+    feeds(input: FeedsInput!): FeedsResult!
+    discoverFeeds: DiscoverFeedResult!
+    scanFeeds(input: ScanFeedsInput!): ScanFeedsResult!
+    home(first: Int, after: String): HomeResult!
+    subscription(id: ID!): SubscriptionResult!
+    hiddenHomeSection: HiddenHomeSectionResult!
+    highlights(after: String, first: Int, query: String): HighlightsResult!
+    folderPolicies: FolderPoliciesResult!
+    posts(userId: ID!, after: String, first: Int): PostsResult!
+    post(id: ID!): PostResult!
+  }
+
+  schema {
+    query: Query
+    mutation: Mutation
+    subscription: SubscriptionRootType
+  }

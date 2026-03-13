@@ -3,6 +3,10 @@ package api
 import (
 	"net/http"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/playground"
+	"github.com/omnivore-app/omnivore/internal/api/graphql/generated"
+	"github.com/omnivore-app/omnivore/internal/api/graphql/resolver"
 	"github.com/omnivore-app/omnivore/internal/api/middleware"
 	"github.com/omnivore-app/omnivore/internal/api/rest/auth"
 	"github.com/omnivore-app/omnivore/internal/config"
@@ -49,21 +53,29 @@ func (s *Server) routes() http.Handler {
 
 	// Internal service-to-service routes will be wired here in Phase 6.
 
-	// GraphQL endpoint (placeholder until Phase 2 wires in gqlgen).
-	mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "GraphQL not yet implemented", http.StatusNotImplemented)
-	})
-	mux.HandleFunc("GET /graphql", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "GraphQL not yet implemented", http.StatusNotImplemented)
-	})
+	// GraphQL endpoint
+	gqlHandler := handler.NewDefaultServer(
+		generated.NewExecutableSchema(generated.Config{
+			Resolvers: &resolver.Resolver{
+				Config: s.cfg,
+				DB:     s.db,
+				Redis:  s.redis,
+			},
+		}),
+	)
+	mux.Handle("POST /graphql", gqlHandler)
+	mux.Handle("GET /graphql", gqlHandler)
+
+	// GraphQL playground (local development only)
+	if s.cfg.APIEnv == "local" || s.cfg.APIEnv == "" {
+		mux.Handle("GET /playground", playground.Handler("Omnivore GraphQL", "/graphql"))
+	}
 
 	// Apply global middleware (outermost → innermost): Logging → Auth → CORS → mux
 	apiKeyLookup := buildAPIKeyLookup(s.db)
-	handler := middleware.Logging(
+	return middleware.Logging(
 		middleware.AuthMiddleware(s.cfg.JWTSecret, s.redis.CacheClient, apiKeyLookup)(
 			middleware.CORS(s.cfg.ClientURL)(mux),
 		),
 	)
-
-	return handler
 }
