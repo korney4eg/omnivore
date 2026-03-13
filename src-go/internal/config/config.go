@@ -50,6 +50,39 @@ type Config struct {
 
 	// Domain blocking
 	MaxFeedFetchFailures int
+
+	// --- API server ---
+
+	// Database
+	PGHost     string
+	PGPort     int
+	PGUser     string
+	PGPassword string
+	PGDatabase string
+	PGPoolMax  int
+	// Optional read replica; falls back to primary when empty.
+	PGReplicaHost     string
+	PGReplicaPort     int
+	PGReplicaUser     string
+	PGReplicaPassword string
+	PGReplicaDatabase string
+
+	// HTTP
+	APIPort   int    // default 4000
+	ClientURL string // allowed CORS origin
+
+	// Content fetcher (internal)
+	ContentFetchURL string
+
+	// Image proxy
+	ImageProxyURL    string
+	ImageProxySecret string
+
+	// Email
+	SendgridAPIKey string
+
+	// Feature flags
+	AutoVerify bool // skip email verification in dev
 }
 
 func Load() *Config {
@@ -82,6 +115,31 @@ func Load() *Config {
 		JWTSecret:                   os.Getenv("JWT_SECRET"),
 
 		MaxFeedFetchFailures: envInt("MAX_FEED_FETCH_FAILURES", 10),
+
+		PGHost:     envDefault("PG_HOST", "localhost"),
+		PGPort:     envInt("PG_PORT", 5432),
+		PGUser:     envDefault("PG_USER", "app_user"),
+		PGPassword: os.Getenv("PG_PASSWORD"),
+		PGDatabase: envDefault("PG_DB", "omnivore"),
+		PGPoolMax:  envInt("PG_POOL_MAX", 10),
+
+		PGReplicaHost:     os.Getenv("PG_REPLICA_HOST"),
+		PGReplicaPort:     envInt("PG_REPLICA_PORT", 5432),
+		PGReplicaUser:     os.Getenv("PG_REPLICA_USER"),
+		PGReplicaPassword: os.Getenv("PG_REPLICA_PASSWORD"),
+		PGReplicaDatabase: os.Getenv("PG_REPLICA_DB"),
+
+		APIPort:   envInt("PORT", 4000),
+		ClientURL: os.Getenv("CLIENT_URL"),
+
+		ContentFetchURL: os.Getenv("CONTENT_FETCH_URL"),
+
+		ImageProxyURL:    os.Getenv("IMAGE_PROXY_URL"),
+		ImageProxySecret: os.Getenv("IMAGE_PROXY_SECRET"),
+
+		SendgridAPIKey: os.Getenv("SENDGRID_API_KEY"),
+
+		AutoVerify: os.Getenv("AUTO_VERIFY") == "true",
 	}
 
 	return cfg
