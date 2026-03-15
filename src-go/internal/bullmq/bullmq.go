@@ -152,23 +152,23 @@ func AddBulk(ctx context.Context, redisClient *redis.Client, queueName string, j
 			pipe.LPush(ctx, waitKey(queueName), jobID)
 		}
 
-		// Publish event for BullMQ dashboard/metrics compatibility
+		if _, err := pipe.Exec(ctx); err != nil {
+			return fmt.Errorf("add job %s: %w", jobID, err)
+		}
+
+		// Publish event for BullMQ dashboard/metrics compatibility (best-effort)
 		eventPayload, _ := json.Marshal(map[string]interface{}{
 			"jobId": jobID,
 			"prev":  "waiting",
 		})
-		pipe.XAdd(ctx, &redis.XAddArgs{
+		_ = redisClient.XAdd(ctx, &redis.XAddArgs{
 			Stream: eventsKey(queueName),
 			Values: map[string]interface{}{
 				"event": "waiting",
 				"data":  string(eventPayload),
 			},
 			MaxLen: 10000,
-		})
-
-		if _, err := pipe.Exec(ctx); err != nil {
-			return fmt.Errorf("add job %s: %w", jobID, err)
-		}
+		}).Err()
 
 		log.Printf("Queued job %s/%s id=%s", queueName, j.Name, jobID)
 	}
