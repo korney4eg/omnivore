@@ -1,0 +1,105 @@
+# Docker Compose for Go API services.
+# Run alongside the main docker-compose.yml which provides postgres, redis, and migrate.
+#
+# Usage:
+#   # Start infrastructure (from repo root)
+#   docker compose up postgres redis migrate -d
+#
+#   # Start Go services
+#   cd src-go && docker compose up
+#
+# Or use the combined profile from repo root:
+#   docker compose -f docker-compose.yml -f src-go/docker-compose.yml up
+
+version: '3'
+
+services:
+  api-go:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: "omnivore-api-go"
+    ports:
+      - "4000:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/_ah/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+    environment:
+      - API_ENV=local
+      - PG_HOST=postgres
+      - PG_USER=app_user
+      - PG_PASSWORD=app_pass
+      - PG_DB=omnivore
+      - PG_PORT=5432
+      - PG_REPLICA_HOST=postgres
+      - PG_REPLICA_PORT=5432
+      - IMAGE_PROXY_SECRET=some-secret
+      - JWT_SECRET=some_secret
+      - CLIENT_URL=http://localhost:3000
+      - REDIS_URL=redis://redis:6379
+      - REDIS_MQ_URL=redis://redis:6379
+    networks:
+      - omnivore
+    depends_on:
+      - redis
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-worker
+    container_name: "omnivore-backend-worker"
+    ports:
+      - "8081:8081"
+    environment:
+      - API_ENV=local
+      - PG_HOST=postgres
+      - PG_USER=app_user
+      - PG_PASSWORD=app_pass
+      - PG_DB=omnivore
+      - PG_PORT=5432
+      - PG_REPLICA_HOST=postgres
+      - PG_REPLICA_PORT=5432
+      - JWT_SECRET=some_secret
+      - REDIS_URL=redis://redis:6379
+      - REDIS_MQ_URL=redis://redis:6379
+    networks:
+      - omnivore
+    depends_on:
+      - redis
+
+  content-fetcher-go:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: content-fetcher
+    container_name: "omnivore-content-fetcher-go"
+    ports:
+      - "9090:8080"
+    environment:
+      - JWT_SECRET=some_secret
+      - VERIFICATION_TOKEN=some_token
+      - REDIS_URL=redis://redis:6379
+      - REDIS_MQ_URL=redis://redis:6379
+    networks:
+      - omnivore
+    depends_on:
+      - redis
+
+  redis:
+    image: "redis:7.2.4"
+    container_name: "omnivore-redis"
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+    networks:
+      - omnivore
+
+networks:
+  omnivore:
+    external: true
+    name: omnivore_default
