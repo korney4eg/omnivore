@@ -14,6 +14,12 @@
       "port": 8080
     },
     {
+      "name": "backend-worker-go",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd src-go && go run . server backend-worker"],
+      "port": 8081
+    },
+    {
       "name": "api",
       "runtimeExecutable": "yarn",
       "runtimeArgs": ["workspace", "@omnivore/api", "dev"],

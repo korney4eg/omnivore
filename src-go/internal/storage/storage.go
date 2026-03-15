@@ -63,6 +63,25 @@ func (c *Client) Close() error {
 	return c.bucket.Close()
 }
 
+// Download reads the content at filePath from the bucket.
+// A 30-second read timeout is applied.
+func (c *Client) Download(ctx context.Context, filePath string) ([]byte, error) {
+	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	r, err := c.bucket.NewReader(readCtx, filePath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new blob reader %s: %w", filePath, err)
+	}
+	defer r.Close()
+
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read blob %s: %w", filePath, err)
+	}
+	return data, nil
+}
+
 // UploadContent uploads a content string to the bucket at filePath.
 // A 30-second write timeout is applied.
 func (c *Client) UploadContent(ctx context.Context, filePath, content string) error {

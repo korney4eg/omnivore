@@ -14,6 +14,7 @@ import (
 	"github.com/omnivore-app/omnivore/internal/api/graphql/model"
 	"github.com/omnivore-app/omnivore/internal/api/graphql/scalar"
 	"github.com/omnivore-app/omnivore/internal/api/services"
+	"github.com/omnivore-app/omnivore/internal/queue"
 )
 
 // GoogleLogin is the resolver for the googleLogin field.
@@ -185,6 +186,9 @@ func (r *mutationResolver) CreateHighlight(ctx context.Context, input model.Crea
 	if err != nil {
 		return model.CreateHighlightError{ErrorCodes: []model.CreateHighlightErrorCode{model.CreateHighlightErrorCodeBadData}}, nil
 	}
+	// Enqueue highlight denormalization and webhook dispatch
+	_ = r.Services.Queue.EnqueueUpdateHighlight(ctx, input.ArticleID, c.UID)
+	_ = r.Services.Queue.EnqueueCallWebhook(ctx, c.UID, "highlight", "created", map[string]any{"highlightId": h.ID, "libraryItemId": input.ArticleID})
 	return model.CreateHighlightSuccess{Highlight: mapHighlight(h)}, nil
 }
 
@@ -231,6 +235,9 @@ func (r *mutationResolver) MergeHighlight(ctx context.Context, input model.Merge
 	if err != nil {
 		return model.MergeHighlightError{ErrorCodes: []model.MergeHighlightErrorCode{model.MergeHighlightErrorCodeBadData}}, nil
 	}
+	// Enqueue highlight denormalization
+	_ = r.Services.Queue.EnqueueUpdateHighlight(ctx, input.ArticleID, c.UID)
+	_ = r.Services.Queue.EnqueueCallWebhook(ctx, c.UID, "highlight", "created", map[string]any{"highlightId": h.ID, "libraryItemId": input.ArticleID})
 	return model.MergeHighlightSuccess{Highlight: mapHighlight(h), OverlapHighlightIDList: input.OverlapHighlightIDList}, nil
 }
 
@@ -248,6 +255,8 @@ func (r *mutationResolver) UpdateHighlight(ctx context.Context, input model.Upda
 	if err != nil {
 		return model.UpdateHighlightError{ErrorCodes: []model.UpdateHighlightErrorCode{model.UpdateHighlightErrorCodeUnauthorized}}, nil
 	}
+	_ = r.Services.Queue.EnqueueUpdateHighlight(ctx, h.LibraryItemID, c.UID)
+	_ = r.Services.Queue.EnqueueCallWebhook(ctx, c.UID, "highlight", "updated", map[string]any{"highlightId": h.ID})
 	return model.UpdateHighlightSuccess{Highlight: mapHighlight(h)}, nil
 }
 
@@ -260,6 +269,10 @@ func (r *mutationResolver) DeleteHighlight(ctx context.Context, highlightID stri
 	h, _ := r.Services.Highlights.GetByID(ctx, highlightID, c.UID)
 	if err := r.Services.Highlights.Delete(ctx, highlightID, c.UID); err != nil {
 		return model.DeleteHighlightError{ErrorCodes: []model.DeleteHighlightErrorCode{model.DeleteHighlightErrorCodeUnauthorized}}, nil
+	}
+	if h != nil {
+		_ = r.Services.Queue.EnqueueUpdateHighlight(ctx, h.LibraryItemID, c.UID)
+		_ = r.Services.Queue.EnqueueCallWebhook(ctx, c.UID, "highlight", "deleted", map[string]any{"highlightId": highlightID, "libraryItemId": h.LibraryItemID})
 	}
 	return model.DeleteHighlightSuccess{Highlight: mapHighlight(h)}, nil
 }
@@ -363,6 +376,14 @@ func (r *mutationResolver) CreateArticleSavingRequest(ctx context.Context, input
 	if err != nil {
 		return model.CreateArticleSavingRequestError{ErrorCodes: []model.CreateArticleSavingRequestErrorCode{model.CreateArticleSavingRequestErrorCodeUnauthorized}}, nil
 	}
+	// Enqueue content fetching
+	_ = r.Services.Queue.EnqueueFetchContent(ctx, queue.FetchContentJobData{
+		URL:           input.URL,
+		UserID:        c.UID,
+		SaveRequestID: item.ID,
+		Source:        "api",
+		Priority:      "high",
+	})
 	status := model.ArticleSavingRequestStatus(item.State)
 	return model.CreateArticleSavingRequestSuccess{
 		ArticleSavingRequest: &model.ArticleSavingRequest{ID: item.ID, UserID: c.UID, Status: status},
@@ -425,7 +446,7 @@ func (r *mutationResolver) SaveURL(ctx context.Context, input model.SaveURLInput
 		t := time.Time(*input.PublishedAt)
 		publishedAt = &t
 	}
-	_, err = r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
+	item, err := r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
 		URL:         input.URL,
 		Title:       input.URL,
 		Folder:      folder,
@@ -436,6 +457,16 @@ func (r *mutationResolver) SaveURL(ctx context.Context, input model.SaveURLInput
 	if err != nil {
 		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnknown}}, nil
 	}
+	// Enqueue content fetching for the saved URL
+	_ = r.Services.Queue.EnqueueFetchContent(ctx, queue.FetchContentJobData{
+		URL:           input.URL,
+		UserID:        c.UID,
+		SaveRequestID: item.ID,
+		Folder:        folder,
+		Source:        input.Source,
+		Priority:      "high",
+	})
+	_ = r.Services.Queue.EnqueueCallWebhook(ctx, c.UID, "page", "created", map[string]any{"libraryItemId": item.ID, "url": input.URL})
 	return model.SaveSuccess{URL: input.URL, ClientRequestID: input.ClientRequestID}, nil
 }
 
@@ -468,7 +499,7 @@ func (r *mutationResolver) SavePage(ctx context.Context, input model.SavePageInp
 	if input.Title != nil {
 		title = *input.Title
 	}
-	_, err = r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
+	item, err := r.Services.LibraryItems.SavePage(ctx, c.UID, services.SavePageInput{
 		URL:         input.URL,
 		Title:       title,
 		Content:     &content,
@@ -480,6 +511,9 @@ func (r *mutationResolver) SavePage(ctx context.Context, input model.SavePageInp
 	if err != nil {
 		return model.SaveError{ErrorCodes: []model.SaveErrorCode{model.SaveErrorCodeUnknown}}, nil
 	}
+	// Trigger rules and webhooks for saved page
+	_ = r.Services.Queue.EnqueueTriggerRule(ctx, c.UID, "PAGE_CREATED", map[string]any{"libraryItemId": item.ID, "url": input.URL, "title": title})
+	_ = r.Services.Queue.EnqueueCallWebhook(ctx, c.UID, "page", "created", map[string]any{"libraryItemId": item.ID, "url": input.URL})
 	return model.SaveSuccess{URL: input.URL, ClientRequestID: input.ClientRequestID}, nil
 }
 
@@ -615,6 +649,10 @@ func (r *mutationResolver) SetLabels(ctx context.Context, input model.SetLabelsI
 	if err != nil {
 		return model.SetLabelsError{ErrorCodes: []model.SetLabelsErrorCode{model.SetLabelsErrorCodeUnauthorized}}, nil
 	}
+	// Enqueue label denormalization and webhook/rule dispatch
+	_ = r.Services.Queue.EnqueueUpdateLabels(ctx, input.PageID, c.UID)
+	_ = r.Services.Queue.EnqueueCallWebhook(ctx, c.UID, "label", "created", map[string]any{"libraryItemId": input.PageID})
+	_ = r.Services.Queue.EnqueueTriggerRule(ctx, c.UID, "LABEL_CREATED", map[string]any{"libraryItemId": input.PageID})
 	return model.SetLabelsSuccess{Labels: mapLabels(labels)}, nil
 }
 

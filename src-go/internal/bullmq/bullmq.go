@@ -33,7 +33,18 @@ const (
 	BackendQueue      = "omnivore-backend-queue"
 
 	// Job names
-	SavePageJob = "save-page"
+	SavePageJob       = "save-page"
+	UpdateLabelsJob   = "update-labels"
+	UpdateHighlightJob = "update-highlight"
+	TriggerRuleJob    = "trigger-rule"
+	CallWebhookJob    = "call-webhook"
+	RefreshFeedJob    = "refresh-feed"
+	RefreshAllFeedsJob = "refresh-all-feeds"
+	BulkActionJob     = "bulk-action"
+	SendEmailJob      = "send-email"
+	PruneTrashJob     = "prune-trash"
+	ExpireFoldersJob  = "expire-folders"
+	FetchContentJob   = "fetch-content"
 
 	// removeOnComplete/removeOnFail ages (seconds) – match TS defaults
 	completeAge = 3600

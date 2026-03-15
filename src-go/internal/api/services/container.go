@@ -5,6 +5,7 @@ package services
 import (
 	"github.com/omnivore-app/omnivore/internal/config"
 	"github.com/omnivore-app/omnivore/internal/db"
+	"github.com/omnivore-app/omnivore/internal/queue"
 	"github.com/omnivore-app/omnivore/internal/redisutil"
 	"github.com/omnivore-app/omnivore/internal/storage"
 )
@@ -23,6 +24,7 @@ type Container struct {
 	Integrations  *IntegrationService
 	Filters       *FilterService
 	UploadFiles   *UploadFileService
+	Queue         *queue.Dispatcher
 }
 
 // New initialises all services with shared infrastructure.
@@ -40,5 +42,6 @@ func New(cfg *config.Config, database *db.DB, redis *redisutil.RedisDataSource, 
 		Integrations:  newIntegrationService(database),
 		Filters:       newFilterService(database),
 		UploadFiles:   newUploadFileService(database, cfg, store),
+		Queue:         queue.NewDispatcher(redis.MQClient),
 	}
 }
